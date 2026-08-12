@@ -1,0 +1,57 @@
+{
+  "name": "rvr-desktop-crm-app",
+  "productName": "RVR Ratings CRM",
+  "version": "0.1.0",
+  "description": "RVR Rating Partners desktop CRM client (Electron, direct EspoCRM API integration).",
+  "main": "src/main/main.js",
+  "author": "RVR Rating Partners",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:all": "electron-builder -mw"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.2.1",
+    "electron-store": "^8.2.0"
+  },
+  "build": {
+    "appId": "co.uk.rvrratingpartners.desktopcrm",
+    "productName": "RVR Ratings CRM",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Tech-RVR",
+        "repo": "rvr-desktop-crm-app"
+      }
+    ],
+    "win": {
+      "target": ["nsis"],
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": ["dmg", "zip"],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
