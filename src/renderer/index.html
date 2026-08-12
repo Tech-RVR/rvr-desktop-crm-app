@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; connect-src 'self' https://crm.rvrratingpartners.co.uk https://n8n.rvrratingpartners.co.uk;">
+<title>RVR Ratings CRM</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:ital@0;1&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shared/styles.css">
+</head>
+<body>
+
+<div id="login-screen"></div>
+
+<div id="app-shell" style="display:none;">
+  <aside class="sidebar">
+    <div class="brand">RVR Ratings CRM</div>
+    <nav id="sidebar-nav"></nav>
+    <div class="sidebar-footer">
+      <button id="sidebar-logout">Log out</button>
+    </div>
+  </aside>
+  <div class="main-col">
+    <div class="topbar">
+      <div class="user-chip" id="topbar-user"></div>
+      <div id="topbar-clock-widget"></div>
+      <button id="topbar-feedback">Feedback</button>
+    </div>
+    <div id="module-content"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="feedback-modal-backdrop">
+  <div class="modal">
+    <h2>Send feedback</h2>
+    <div class="field">
+      <label for="feedback-type">Type</label>
+      <select id="feedback-type">
+        <option value="Bug">Bug</option>
+        <option value="Feature Request">Feature Request</option>
+        <option value="Something else">Something else</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="feedback-message">Message</label>
+      <textarea id="feedback-message" placeholder="What's on your mind?"></textarea>
+    </div>
+    <div class="status-banner" id="feedback-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="feedback-cancel">Cancel</button>
+      <button class="btn btn-primary" id="feedback-submit">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>window.rvrModules = {};</script>
+<script src="modules/dashboard.js"></script>
+<script src="modules/claim-pool.js"></script>
+<script src="modules/cases.js"></script>
+<script src="modules/pipeline.js"></script>
+<script src="modules/contacts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
