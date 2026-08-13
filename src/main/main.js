@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const Store = require('electron-store');
@@ -96,6 +96,14 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Field clock-in needs GPS. Electron denies permission requests by default,
+  // so the renderer's navigator.geolocation call would otherwise silently
+  // reject. Only geolocation is allowed here — everything else (camera, mic,
+  // notifications, etc.) stays denied since the app has no use for it.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === 'geolocation');
+  });
 
   if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
     autoUpdater.checkForUpdatesAndNotify().catch(() => {

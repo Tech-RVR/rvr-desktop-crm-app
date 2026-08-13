@@ -17,7 +17,8 @@ const MODULES = [
 
 const state = {
   user: null,
-  activeModule: 'dashboard'
+  activeModule: 'dashboard',
+  lastListModule: 'dashboard'
 };
 
 // ---------------------------------------------------------------------------
@@ -148,7 +149,14 @@ function initAppShell() {
   navigateTo(state.activeModule);
 }
 
-function navigateTo(moduleId) {
+function navigateTo(moduleId, params) {
+  // Sidebar-nav modules (dashboard, cases, pipeline, etc.) double as the
+  // "back" target for screens reached by clicking into a record, like
+  // Case detail — those aren't in MODULES/the sidebar, so they don't
+  // overwrite lastListModule.
+  if (MODULES.some((m) => m.id === moduleId)) {
+    state.lastListModule = moduleId;
+  }
   state.activeModule = moduleId;
   document.querySelectorAll('#sidebar-nav button').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.moduleId === moduleId);
@@ -160,32 +168,148 @@ function navigateTo(moduleId) {
     container.innerHTML = `<div class="empty-state">Screen "${escapeHtml(moduleId)}" is not wired up yet.</div>`;
     return;
   }
-  mod.render(container, { user: state.user, escapeHtml });
+  mod.render(container, {
+    user: state.user,
+    escapeHtml,
+    params: params || {},
+    openCase: (caseId) => navigateTo('case-detail', { caseId }),
+    goBack: () => navigateTo(state.lastListModule)
+  });
 }
 
 // ---------------------------------------------------------------------------
-// Topbar Clock In/Out widget (office always; Field option Surveyor-only —
-// role check is a simple placeholder here since EspoCRM's own ACL is the
-// real enforcement; this just controls whether the Field option is offered).
+// Topbar Clock In/Out widget. Opens a modal with an Office/Field toggle.
+// Field mode loads the staff member's own assigned cases with a saved site
+// address (via the rvr-my-cases webhook), captures GPS at submit time, and
+// posts to the same rvr-clock-in-out webhook field-clock.html already uses —
+// so the proximity check and Time Tracking Log behave identically either way.
 // ---------------------------------------------------------------------------
+let clockType = 'office';
+let myCasesCache = null;
+
 function renderClockWidget() {
   const el = document.getElementById('topbar-clock-widget');
-  el.innerHTML = `
-    <button id="clock-in-btn">Clock In</button>
-    <button id="clock-out-btn">Clock Out</button>
+  el.innerHTML = '<button id="clock-open-btn">Clock In / Out</button>';
+  document.getElementById('clock-open-btn').addEventListener('click', openClockModal);
+  wireClockModal();
+}
+
+function openClockModal() {
+  const statusEl = document.getElementById('clock-status');
+  statusEl.className = 'status-banner';
+  statusEl.textContent = '';
+  document.getElementById('clock-modal-backdrop').classList.add('show');
+  setClockType('office');
+}
+
+function setClockType(type) {
+  clockType = type;
+  document.querySelectorAll('#clock-type-toggle .toggle-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.type === type);
+  });
+  const caseField = document.getElementById('clock-case-field');
+  if (type === 'field') {
+    caseField.style.display = '';
+    loadMyCasesIntoSelect();
+  } else {
+    caseField.style.display = 'none';
+  }
+}
+
+async function loadMyCasesIntoSelect() {
+  const select = document.getElementById('clock-case-select');
+  select.innerHTML = '<option value="">Loading your cases…</option>';
+
+  if (!myCasesCache) {
+    const res = await window.rvr.clock.myCases(state.user.id);
+    myCasesCache = (res.ok && res.data && res.data.cases) || [];
+  }
+
+  if (myCasesCache.length === 0) {
+    select.innerHTML = '<option value="">No assigned cases with a saved site address</option>';
+    return;
+  }
+
+  select.innerHTML = `
+    <option value="">Select a case…</option>
+    ${myCasesCache.map((c) => `<option value="${escapeHtml(c.id)}">#${escapeHtml(c.number)} — ${escapeHtml(c.address || 'No address on file')}</option>`).join('')}
   `;
-  document.getElementById('clock-in-btn').addEventListener('click', () => submitClock('in'));
-  document.getElementById('clock-out-btn').addEventListener('click', () => submitClock('out'));
+}
+
+function getGeolocation() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Location is not available on this device.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      (err) => reject(new Error(err && err.message ? err.message : 'Could not get your location.')),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  });
+}
+
+function wireClockModal() {
+  document.querySelectorAll('#clock-type-toggle .toggle-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setClockType(btn.dataset.type));
+  });
+  document.getElementById('clock-cancel').addEventListener('click', () => {
+    document.getElementById('clock-modal-backdrop').classList.remove('show');
+  });
+  document.getElementById('clock-in-submit').addEventListener('click', () => submitClock('in'));
+  document.getElementById('clock-out-submit').addEventListener('click', () => submitClock('out'));
 }
 
 async function submitClock(action) {
-  const payload = { staffName: `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName, type: 'office', action };
-  const res = await window.rvr.clock.event(payload);
-  if (res.ok) {
-    alert(`Clocked ${action} successfully.`);
-  } else {
-    alert('Could not log the clock event. Please try again.');
+  const statusEl = document.getElementById('clock-status');
+  const submitBtns = [document.getElementById('clock-in-submit'), document.getElementById('clock-out-submit')];
+  const staffName = `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName;
+  const payload = { staffName, type: clockType, action };
+
+  if (clockType === 'field') {
+    const caseId = document.getElementById('clock-case-select').value;
+    if (!caseId) {
+      statusEl.textContent = "Please select which case you're visiting.";
+      statusEl.className = 'status-banner show err';
+      return;
+    }
+    payload.caseId = caseId;
+
+    statusEl.textContent = 'Getting your location…';
+    statusEl.className = 'status-banner show info';
+    try {
+      const pos = await getGeolocation();
+      payload.currentLat = pos.latitude;
+      payload.currentLng = pos.longitude;
+    } catch (err) {
+      statusEl.textContent = `${err.message} Check location permissions and try again.`;
+      statusEl.className = 'status-banner show err';
+      return;
+    }
   }
+
+  submitBtns.forEach((btn) => { btn.disabled = true; });
+  statusEl.textContent = 'Logging…';
+  statusEl.className = 'status-banner show info';
+
+  const res = await window.rvr.clock.event(payload);
+
+  submitBtns.forEach((btn) => { btn.disabled = false; });
+
+  if (!res.ok) {
+    statusEl.textContent = 'Could not log the clock event. Please try again.';
+    statusEl.className = 'status-banner show err';
+    return;
+  }
+
+  const data = res.data || {};
+  statusEl.textContent = `Clocked ${action} successfully.${data.notes ? ` — ${data.notes}` : ''}`;
+  statusEl.className = 'status-banner show ok';
+
+  setTimeout(() => {
+    document.getElementById('clock-modal-backdrop').classList.remove('show');
+  }, 1800);
 }
 
 // ---------------------------------------------------------------------------

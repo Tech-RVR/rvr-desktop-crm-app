@@ -35,7 +35,7 @@
         <thead><tr><th>Case</th><th>Stage</th><th>Contact</th><th>Address</th></tr></thead>
         <tbody>
           ${cases.map((c) => `
-            <tr>
+            <tr class="clickable-row" data-case-id="${ctx.escapeHtml(c.id)}">
               <td>#${ctx.escapeHtml(c.number)} — ${ctx.escapeHtml(c.name || '')}</td>
               <td>${ctx.escapeHtml(c.cCaseStage || '—')}</td>
               <td>${ctx.escapeHtml(c.contactName || '—')}</td>
@@ -44,8 +44,12 @@
           `).join('')}
         </tbody>
       </table>
-      <p style="color:var(--slate); font-size:12px; margin-top:12px;">Showing the 50 most recent cases visible to you. A detail view / filters are a natural next iteration.</p>
+      <p style="color:var(--slate); font-size:12px; margin-top:12px;">Showing the 50 most recent cases visible to you. Click a row to open it. Filters are a natural next iteration.</p>
     `;
+
+    listEl.querySelectorAll('tr.clickable-row').forEach((row) => {
+      row.addEventListener('click', () => ctx.openCase(row.dataset.caseId));
+    });
   }
 
   window.rvrModules.cases = { render };

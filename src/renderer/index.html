@@ -31,6 +31,29 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="clock-modal-backdrop">
+  <div class="modal">
+    <h2>Clock In / Out</h2>
+    <div class="field">
+      <label>Visit type</label>
+      <div class="toggle-group" id="clock-type-toggle">
+        <button type="button" class="toggle-btn active" data-type="office">Office</button>
+        <button type="button" class="toggle-btn" data-type="field">Field</button>
+      </div>
+    </div>
+    <div class="field" id="clock-case-field" style="display:none;">
+      <label for="clock-case-select">Which case are you at?</label>
+      <select id="clock-case-select"><option value="">Loading your cases…</option></select>
+    </div>
+    <div class="status-banner" id="clock-status"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="clock-cancel">Cancel</button>
+      <button class="btn btn-secondary" id="clock-out-submit">Clock Out</button>
+      <button class="btn btn-primary" id="clock-in-submit">Clock In</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="feedback-modal-backdrop">
   <div class="modal">
     <h2>Send feedback</h2>
@@ -60,6 +83,7 @@
 <script src="modules/cases.js"></script>
 <script src="modules/pipeline.js"></script>
 <script src="modules/contacts.js"></script>
+<script src="modules/case-detail.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -1,14 +1,19 @@
 'use strict';
 
 (function () {
-  // Matches the 12-stage pipeline referenced throughout the project docs.
-  // Kept here (rather than fetched) since EspoCRM's own field-level enum
-  // order is the source of truth and rarely changes; a future iteration
-  // could read this from Metadata instead of hardcoding it.
+  // The real 12-stage pipeline + disputed flag, per
+  // EspoCRM_Case_Entity_Scope_DRAFT.md (cCaseStage's actual enum order).
+  // Kept here (rather than fetched) since the field's enum order is the
+  // source of truth and rarely changes; a future iteration could read this
+  // from Metadata instead of hardcoding it.
+  // Corrected 2026-08-13 — the previous list here didn't match the live enum
+  // at all (stale/guessed names from an earlier draft), so cards were being
+  // grouped under stage names the field doesn't actually have.
   const STAGE_ORDER = [
-    'New', 'Check', 'Challenge', 'Evidence Gathering', 'Site Inspection',
-    'Bill & Document Review', 'Bill Review & Relief Assessment', 'Invoiced',
-    'Closed', 'Closed Without Payment', 'Closed Without Payment - Disputed'
+    'Enquiry Received', 'Onboarding', 'Bill & Document Review', 'Relief Assessment',
+    'Evidence Gathering / Site Inspection', 'Check', 'Challenge', 'Appeal',
+    'Senior Sign-Off & Savings Confirmation', 'Invoiced', 'Payment / Arrears',
+    'Closed', 'Closed Without Payment - Disputed'
   ];
 
   async function render(container, ctx) {
@@ -45,7 +50,7 @@
           <div class="kanban-col">
             <h3>${ctx.escapeHtml(stage)} (${(byStage[stage] || []).length})</h3>
             ${(byStage[stage] || []).map((c) => `
-              <div class="kanban-card">
+              <div class="kanban-card clickable-row" data-case-id="${ctx.escapeHtml(c.id)}">
                 <div class="case-number">#${ctx.escapeHtml(c.number)}</div>
                 <div class="case-contact">${ctx.escapeHtml(c.contactName || 'No contact linked')}</div>
               </div>
@@ -54,6 +59,10 @@
         `).join('')}
       </div>
     `;
+
+    board.querySelectorAll('.kanban-card.clickable-row').forEach((card) => {
+      card.addEventListener('click', () => ctx.openCase(card.dataset.caseId));
+    });
   }
 
   window.rvrModules.pipeline = { render };

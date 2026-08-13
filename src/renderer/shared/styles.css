@@ -166,3 +166,25 @@ input[type=text], input[type=password], select{
   border-radius:6px; background:var(--paper); color:var(--ink); width:100%; min-height:90px; resize:vertical;
 }
 .modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
+
+/* ---- Office/Field toggle (Clock In/Out modal) ---- */
+.toggle-group{ display:flex; gap:8px; }
+.toggle-btn{
+  flex:1; background:var(--paper); border:1px solid var(--line); border-radius:6px;
+  padding:9px 12px; font-size:13px; cursor:pointer; color:var(--ink-2); font-family:var(--sans);
+}
+.toggle-btn.active{ background:var(--ink-2); color:var(--white); border-color:var(--ink-2); font-weight:600; }
+
+/* ---- Case detail view ---- */
+.back-link{ display:inline-block; margin-bottom:14px; font-size:13px; color:var(--slate); cursor:pointer; text-decoration:none; }
+.back-link:hover{ color:var(--ink-2); text-decoration:underline; }
+.panel h3.panel-heading{ font-size:12px; text-transform:uppercase; letter-spacing:0.03em; color:var(--slate); margin:0 0 14px; font-weight:600; }
+.detail-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:16px; }
+.detail-grid label{ display:block; margin-bottom:3px; }
+.detail-grid > div > div:last-child{ font-size:14px; color:var(--ink); }
+.doc-checklist{ display:flex; flex-wrap:wrap; gap:8px; }
+
+/* ---- Clickable rows/cards (Cases table, Pipeline kanban -> Case detail) ---- */
+tr.clickable-row{ cursor:pointer; }
+tr.clickable-row:hover{ background:var(--paper-2); }
+.kanban-card.clickable-row:hover{ border-color:var(--brick); box-shadow:0 1px 4px rgba(18,33,46,0.08); cursor:pointer; }
