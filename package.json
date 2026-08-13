@@ -41,12 +41,15 @@
       }
     ],
     "win": {
-      "target": ["nsis"],
-      "icon": "build/icon.ico"
+      "target": [
+        "nsis"
+      ]
     },
     "mac": {
-      "target": ["dmg", "zip"],
-      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "category": "public.app-category.business"
     },
     "nsis": {
