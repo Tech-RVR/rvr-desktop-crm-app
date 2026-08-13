@@ -160,3 +160,9 @@ input[type=text], input[type=password], select{
 .modal{
   background:var(--white); border-radius:12px; padding:24px; width:400px; max-width:90vw;
 }
+.modal h2{ font-family:var(--serif); font-weight:400; font-style:italic; font-size:19px; margin:0 0 16px; color:var(--ink-2); }
+.modal textarea{
+  font-family:var(--sans); font-size:14px; padding:10px 12px; border:1px solid var(--line);
+  border-radius:6px; background:var(--paper); color:var(--ink); width:100%; min-height:90px; resize:vertical;
+}
+.modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:16px; }
