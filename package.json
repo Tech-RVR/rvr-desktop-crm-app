@@ -1,7 +1,7 @@
 {
   "name": "rvr-desktop-crm-app",
   "productName": "RVR Ratings CRM",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "RVR Rating Partners desktop CRM client (Electron, direct EspoCRM API integration).",
   "main": "src/main/main.js",
   "author": "RVR Rating Partners",
@@ -47,8 +47,14 @@
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": "universal"
+        },
+        {
+          "target": "zip",
+          "arch": "universal"
+        }
       ],
       "category": "public.app-category.business"
     },
