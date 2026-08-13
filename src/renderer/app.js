@@ -8,11 +8,11 @@
  */
 
 const MODULES = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'claim-pool', label: 'Claim a Case' },
-  { id: 'cases', label: 'Cases' },
-  { id: 'pipeline', label: 'Pipeline' },
-  { id: 'contacts', label: 'Contacts' }
+  { id: 'dashboard', label: 'Dashboard', icon: '\u{1F4CA}' },
+  { id: 'claim-pool', label: 'Claim a Case', icon: '\u{1F4E5}' },
+  { id: 'cases', label: 'Cases', icon: '\u{1F4C1}' },
+  { id: 'pipeline', label: 'Pipeline', icon: '\u{1F9ED}' },
+  { id: 'contacts', label: 'Contacts', icon: '\u{1F464}' }
 ];
 
 const state = {
@@ -105,7 +105,11 @@ async function renderLoginScreen() {
 
     state.user = res.user;
     document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('app-shell').style.display = 'flex';
+    // The app shell's own CSS class (.app) sets `display:grid` for the
+    // topbar-spans-full-width layout — must match that here, not the old
+    // pre-restyle 'flex' value, or this inline style wins (higher
+    // specificity than the stylesheet rule) and silently breaks the grid.
+    document.getElementById('app-shell').style.display = 'grid';
     initAppShell();
   }
 
@@ -125,14 +129,19 @@ async function renderLoginScreen() {
 // App shell: sidebar, topbar, module router
 // ---------------------------------------------------------------------------
 function initAppShell() {
-  document.getElementById('topbar-user').textContent = `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName;
+  const fullName = `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName;
+  document.getElementById('topbar-user').textContent = fullName;
+  const avatarEl = document.getElementById('topbar-avatar');
+  avatarEl.textContent = fullName.trim().charAt(0).toUpperCase() || '?';
+  avatarEl.title = fullName;
 
   const nav = document.getElementById('sidebar-nav');
   nav.innerHTML = '';
   MODULES.forEach((mod) => {
     const btn = document.createElement('button');
-    btn.textContent = mod.label;
+    btn.className = 'nav-item';
     btn.dataset.moduleId = mod.id;
+    btn.innerHTML = `<span class="nav-icon">${mod.icon}</span><span>${escapeHtml(mod.label)}</span>`;
     btn.addEventListener('click', () => navigateTo(mod.id));
     nav.appendChild(btn);
   });
@@ -158,7 +167,7 @@ function navigateTo(moduleId, params) {
     state.lastListModule = moduleId;
   }
   state.activeModule = moduleId;
-  document.querySelectorAll('#sidebar-nav button').forEach((btn) => {
+  document.querySelectorAll('#sidebar-nav button.nav-item').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.moduleId === moduleId);
   });
 

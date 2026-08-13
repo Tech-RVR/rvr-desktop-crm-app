@@ -5,7 +5,9 @@
     container.innerHTML = `
       <h1 class="module-title">Contacts</h1>
       <p class="module-subtitle">Contacts visible to your account.</p>
-      <div id="contacts-list"><div class="loading-state">Loading…</div></div>
+      <div class="panel">
+        <div id="contacts-list"><div class="loading-state">Loading…</div></div>
+      </div>
     `;
 
     const res = await window.rvr.espo.request('Contact', {

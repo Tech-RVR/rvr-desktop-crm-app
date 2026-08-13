@@ -36,6 +36,25 @@
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
+  // Full pipeline stage-track — every stage as a pill, grey if upcoming,
+  // green if passed, gold if current. The disputed terminal state is shown
+  // as a single standalone red pill instead of the track, matching the
+  // mockup's rvr_crm_mockup.html #detStageTrack behaviour exactly.
+  function renderStageTrack(c) {
+    if (c.cCaseStage === 'Closed Without Payment - Disputed') {
+      return '<span class="stage-pill now disputed">Closed Without Payment - Disputed</span>';
+    }
+    const stageIndex = STAGE_ORDER.indexOf(c.cCaseStage);
+    return STAGE_ORDER
+      .filter((s) => s !== 'Closed Without Payment - Disputed')
+      .map((s) => {
+        const idx = STAGE_ORDER.indexOf(s);
+        const cls = idx < stageIndex ? 'done' : (s === c.cCaseStage ? 'now' : '');
+        return `<span class="stage-pill ${cls}">${s}</span>`;
+      })
+      .join('');
+  }
+
   async function render(container, ctx) {
     const caseId = ctx.params && ctx.params.caseId;
 
@@ -59,50 +78,56 @@
     }
 
     const c = res.data || {};
-    const stageIndex = STAGE_ORDER.indexOf(c.cCaseStage);
     const documentsReceived = Array.isArray(c.cDocumentsReceived) ? c.cDocumentsReceived : [];
 
     body.innerHTML = `
-      <h1 class="module-title">Case #${ctx.escapeHtml(c.number)} — ${ctx.escapeHtml(c.name || '')}</h1>
+      <h1 class="module-title">Case #${ctx.escapeHtml(c.number)}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</h1>
       <p class="module-subtitle">
-        <span class="pill neutral">${ctx.escapeHtml(c.cCaseStage || 'No stage set')}</span>
-        ${stageIndex >= 0 ? `<span style="color:var(--slate); font-size:12px; margin-left:8px;">Stage ${stageIndex + 1} of ${STAGE_ORDER.length}</span>` : ''}
+        ${ctx.escapeHtml(formatAddress(c))}
+        <span class="${window.rvrStageBadgeClass(c.cCaseStage)}" style="margin-left:8px;">${ctx.escapeHtml(c.cCaseStage || 'No stage set')}</span>
       </p>
+      <div class="stage-track">${renderStageTrack(c)}</div>
 
-      <div class="panel">
-        <h3 class="panel-heading">Case details</h3>
-        <div class="detail-grid">
-          <div><label>Contact</label><div>${ctx.escapeHtml(c.contactName || '—')}</div></div>
-          <div><label>Assigned to</label><div>${ctx.escapeHtml(c.assignedUserName || 'Unassigned')}</div></div>
-          <div><label>Property address</label><div>${ctx.escapeHtml(formatAddress(c))}</div></div>
-          <div><label>Relief type</label><div>${ctx.escapeHtml(c.cReliefType || '—')}</div></div>
-          <div><label>Rateable value (before)</label><div>${formatCurrency(c.cRateableValueBefore)}</div></div>
-          <div><label>Rateable value (after)</label><div>${formatCurrency(c.cRateableValueAfter)}</div></div>
-          <div><label>Annual saving</label><div>${formatCurrency(c.cAnnualSaving)}</div></div>
-          <div><label>Created</label><div>${formatDate(c.createdAt)}</div></div>
+      <div class="case-columns">
+        <div>
+          <div class="panel">
+            <h3 class="panel-heading">Case details</h3>
+            <div class="detail-grid">
+              <div><label>Contact</label><div>${ctx.escapeHtml(c.contactName || '—')}</div></div>
+              <div><label>Assigned to</label><div>${ctx.escapeHtml(c.assignedUserName || 'Unassigned')}</div></div>
+              <div><label>Property address</label><div>${ctx.escapeHtml(formatAddress(c))}</div></div>
+              <div><label>Relief type</label><div>${ctx.escapeHtml(c.cReliefType || '—')}</div></div>
+              <div><label>Rateable value (before)</label><div>${formatCurrency(c.cRateableValueBefore)}</div></div>
+              <div><label>Rateable value (after)</label><div>${formatCurrency(c.cRateableValueAfter)}</div></div>
+              <div><label>Annual saving</label><div style="color:var(--ok); font-weight:600;">${formatCurrency(c.cAnnualSaving)}</div></div>
+              <div><label>Created</label><div>${formatDate(c.createdAt)}</div></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h3 class="panel-heading">Documents received (${documentsReceived.length}/${DOCUMENT_OPTIONS.length})</h3>
+            <div class="doc-checklist">
+              ${DOCUMENT_OPTIONS.map((doc) => `
+                <span class="pill ${documentsReceived.includes(doc) ? 'good' : 'neutral'}">${documentsReceived.includes(doc) ? '&#10003; ' : ''}${ctx.escapeHtml(doc)}</span>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="panel">
+            <h3 class="panel-heading">Invoicing</h3>
+            <div class="detail-grid">
+              <div><label>Invoice date</label><div>${formatDate(c.cInvoiceDate)}</div></div>
+              <div><label>Payment due</label><div>${formatDate(c.cPaymentDueDate)}</div></div>
+              <div><label>Invoice paid</label><div><span class="pill ${c.cInvoicePaid ? 'good' : 'neutral'}">${c.cInvoicePaid ? 'Paid' : 'Not yet paid'}</span></div></div>
+              <div><label>Reminder sent</label><div>${c.cPaymentReminderSent ? 'Yes' : 'No'}</div></div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div class="panel">
-        <h3 class="panel-heading">Invoicing</h3>
-        <div class="detail-grid">
-          <div><label>Invoice date</label><div>${formatDate(c.cInvoiceDate)}</div></div>
-          <div><label>Payment due</label><div>${formatDate(c.cPaymentDueDate)}</div></div>
-          <div><label>Invoice paid</label><div><span class="pill ${c.cInvoicePaid ? 'good' : 'neutral'}">${c.cInvoicePaid ? 'Paid' : 'Not yet paid'}</span></div></div>
-          <div><label>Reminder sent</label><div>${c.cPaymentReminderSent ? 'Yes' : 'No'}</div></div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h3 class="panel-heading">Documents received (${documentsReceived.length}/${DOCUMENT_OPTIONS.length})</h3>
-        <div class="doc-checklist">
-          ${DOCUMENT_OPTIONS.map((doc) => `
-            <span class="pill ${documentsReceived.includes(doc) ? 'good' : 'neutral'}">${documentsReceived.includes(doc) ? '&#10003; ' : ''}${ctx.escapeHtml(doc)}</span>
-          `).join('')}
-        </div>
-      </div>
-
-      <p style="color:var(--slate); font-size:12px;">
+      <p style="color:var(--muted); font-size:12px;">
         Open the full record in EspoCRM for editing, file uploads, or the activity stream:
         <a href="https://crm.rvrratingpartners.co.uk/#Case/view/${encodeURIComponent(caseId)}" target="_blank" rel="noopener">Open in EspoCRM &rarr;</a>
       </p>
