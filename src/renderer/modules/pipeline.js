@@ -28,6 +28,7 @@
     });
 
     const board = container.querySelector('#pipeline-board');
+    if (!board) return;
 
     if (!res.ok) {
       board.innerHTML = `<div class="empty-state">Could not load the pipeline (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;

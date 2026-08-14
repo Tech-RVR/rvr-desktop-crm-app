@@ -230,3 +230,25 @@ input[type=text], input[type=password], select{
 /* ---- Clickable rows (Cases table) ---- */
 tr.clickable-row{ cursor:pointer; }
 tr.clickable-row:hover{ background:#f7f9fc; }
+
+/* --- Module header row (title + primary action) ------------------------- */
+.module-header{ display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+.module-header p.module-subtitle{ margin-bottom:18px; }
+
+/* --- Forms in the main content area (New Case) -------------------------- */
+/* The base input rule only covers text/password/select, which was enough for
+   the login card and modals. Intake forms also need number inputs and
+   textareas to match, or the New Case screen looks half-styled. */
+input[type=number], input[type=email], input[type=tel], .form-panel textarea{
+  padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+  font-size:14px; font-family:var(--sans); background:#fff; color:var(--text);
+}
+.form-panel textarea{ resize:vertical; min-height:80px; }
+.form-panel .field{ max-width:520px; }
+.form-panel .field-hint{
+  font-size:11.5px; color:var(--muted); text-transform:none; letter-spacing:0; margin-top:-2px;
+}
+.form-panel .req{ color:var(--danger); }
+.form-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:0 16px; max-width:800px; }
+.form-grid .field{ max-width:none; }
+.form-actions{ display:flex; justify-content:flex-end; gap:10px; margin:4px 0 28px; }

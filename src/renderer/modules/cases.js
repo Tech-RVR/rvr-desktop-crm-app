@@ -10,12 +10,19 @@
 
   async function render(container, ctx) {
     container.innerHTML = `
-      <h1 class="module-title">Cases</h1>
-      <p class="module-subtitle">Cases visible to your account, per your EspoCRM role and access.</p>
+      <div class="module-header">
+        <div>
+          <h1 class="module-title">Cases</h1>
+          <p class="module-subtitle">Cases visible to your account, per your EspoCRM role and access.</p>
+        </div>
+        <button class="btn btn-primary" id="cases-new">+ New case</button>
+      </div>
       <div class="panel">
         <div id="cases-list"><div class="loading-state">Loading…</div></div>
       </div>
     `;
+
+    container.querySelector('#cases-new').addEventListener('click', () => ctx.navigateTo('case-new'));
 
     const res = await window.rvr.espo.request('Case', {
       query: {
@@ -27,6 +34,9 @@
     });
 
     const listEl = container.querySelector('#cases-list');
+    // Belt-and-braces: the router now hands each render its own container, so
+    // this should never be null. Bailing out quietly beats throwing if it ever is.
+    if (!listEl) return;
 
     if (!res.ok) {
       listEl.innerHTML = `<div class="empty-state">Could not load cases (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;

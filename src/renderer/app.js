@@ -11,9 +11,15 @@ const MODULES = [
   { id: 'dashboard', label: 'Dashboard', icon: '\u{1F4CA}' },
   { id: 'claim-pool', label: 'Claim a Case', icon: '\u{1F4E5}' },
   { id: 'cases', label: 'Cases', icon: '\u{1F4C1}' },
+  { id: 'case-new', label: 'New Case', icon: '\u{2795}' },
   { id: 'pipeline', label: 'Pipeline', icon: '\u{1F9ED}' },
   { id: 'contacts', label: 'Contacts', icon: '\u{1F464}' }
 ];
+
+// Sidebar entries that are actions rather than lists. They still get a nav
+// button, but they must never become the "back" target for Case detail —
+// going back from a case into a blank creation form reads as a bug.
+const NON_LIST_MODULES = ['case-new'];
 
 const state = {
   user: null,
@@ -183,12 +189,19 @@ function initAppShell() {
   navigateTo(state.activeModule);
 }
 
+// Incremented on every navigation. A module's render() is async — it paints a
+// skeleton, awaits an EspoCRM call, then fills in the result. If the user
+// clicks another sidebar item while that call is in flight, the old render
+// resumes against a screen that no longer exists. In 0.2.2 that threw
+// "Cannot set properties of null (setting 'innerHTML')" out of cases.js.
+let navSeq = 0;
+
 function navigateTo(moduleId, params) {
   // Sidebar-nav modules (dashboard, cases, pipeline, etc.) double as the
   // "back" target for screens reached by clicking into a record, like
   // Case detail — those aren't in MODULES/the sidebar, so they don't
-  // overwrite lastListModule.
-  if (MODULES.some((m) => m.id === moduleId)) {
+  // overwrite lastListModule. Action screens (New Case) are excluded too.
+  if (MODULES.some((m) => m.id === moduleId) && !NON_LIST_MODULES.includes(moduleId)) {
     state.lastListModule = moduleId;
   }
   state.activeModule = moduleId;
@@ -196,18 +209,69 @@ function navigateTo(moduleId, params) {
     btn.classList.toggle('active', btn.dataset.moduleId === moduleId);
   });
 
+  const seq = ++navSeq;
+
+  // Give every navigation its OWN content element rather than reusing (and
+  // overwriting) one shared node. A render still mid-await when the user
+  // navigates away then finishes harmlessly against a detached element:
+  // its container.querySelector() calls still resolve, so nothing throws,
+  // and nothing it writes reaches the screen. This protects every module at
+  // once, including any added later, instead of patching each one.
+  const previous = document.getElementById('module-content');
+  const container = document.createElement('div');
+  container.id = 'module-content';
+  container.className = previous ? previous.className : '';
+  if (previous) {
+    previous.replaceWith(container);
+  } else {
+    document.querySelector('.main-col').appendChild(container);
+  }
+
   const mod = window.rvrModules && window.rvrModules[moduleId];
-  const container = document.getElementById('module-content');
   if (!mod) {
     container.innerHTML = `<div class="empty-state">Screen "${escapeHtml(moduleId)}" is not wired up yet.</div>`;
     return;
   }
-  mod.render(container, {
-    user: state.user,
-    escapeHtml,
-    params: params || {},
-    openCase: (caseId) => navigateTo('case-detail', { caseId }),
-    goBack: () => navigateTo(state.lastListModule)
+
+  let result;
+  try {
+    result = mod.render(container, {
+      user: state.user,
+      escapeHtml,
+      params: params || {},
+      // True once the user has navigated elsewhere. Modules doing anything
+      // beyond painting into their own container after an await — showing a
+      // toast, navigating, starting a poll — should check this first.
+      isStale: () => seq !== navSeq,
+      navigateTo: (id, p) => navigateTo(id, p),
+      openCase: (caseId) => navigateTo('case-detail', { caseId }),
+      goBack: () => navigateTo(state.lastListModule)
+    });
+  } catch (err) {
+    reportModuleFailure(moduleId, container, seq, err);
+    return;
+  }
+
+  // A rejected render used to surface as a bare unhandled promise rejection —
+  // reported to App Error Tracking, but leaving the user on a stuck "Loading…"
+  // with no explanation. Now it reports AND says something on screen.
+  if (result && typeof result.catch === 'function') {
+    result.catch((err) => reportModuleFailure(moduleId, container, seq, err));
+  }
+}
+
+function reportModuleFailure(moduleId, container, seq, err) {
+  if (seq === navSeq && container.isConnected) {
+    container.innerHTML = `
+      <div class="empty-state">
+        Sorry — the ${escapeHtml(moduleId)} screen couldn't load.<br>
+        Please try again, or use the Feedback button if it keeps happening.
+      </div>`;
+  }
+  window.rvr.app.reportRendererError({
+    errorMessage: err && err.message ? err.message : String(err),
+    stackTrace: err && err.stack ? err.stack : '(no stack trace)',
+    userAction: `Rendering the "${moduleId}" screen`
   });
 }
 

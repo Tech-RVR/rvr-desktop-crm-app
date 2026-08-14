@@ -15,6 +15,7 @@
     });
 
     const listEl = container.querySelector('#contacts-list');
+    if (!listEl) return;
 
     if (!res.ok) {
       listEl.innerHTML = `<div class="empty-state">Could not load contacts (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;

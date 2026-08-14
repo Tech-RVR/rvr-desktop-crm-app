@@ -71,6 +71,7 @@
 
     const res = await window.rvr.espo.request(`Case/${caseId}`);
     const body = container.querySelector('#case-detail-body');
+    if (!body) return;
 
     if (!res.ok) {
       body.innerHTML = `<div class="empty-state">Could not load this case (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
