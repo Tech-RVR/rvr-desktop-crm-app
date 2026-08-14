@@ -70,7 +70,25 @@ class EspoClient {
       throw new EspoAuthError(`EspoCRM returned an unexpected error (HTTP ${res.status}). Please try again.`, res.status);
     }
 
-    const user = await res.json();
+    // GET App/user does NOT return a bare user record. EspoCRM wraps it:
+    //   { user: {...}, acl: {...}, preferences: {...}, settings: {...},
+    //     appParams: {...}, token: "..." }
+    // (see EspoCRM's own client/src/app.js -> onAuth: `data.user`).
+    // Reading `.userName`/`.id` straight off the envelope silently yields
+    // undefined, which is what broke the app shell in 0.2.1 — the topbar
+    // avatar called .trim() on an undefined display name and every
+    // user.id-dependent call (claim-a-case, Field clock-in) sent undefined.
+    // `|| payload` keeps this working if a future Espo version ever returns
+    // the record unwrapped.
+    const payload = await res.json();
+    const user = (payload && payload.user) || payload || {};
+
+    if (!user.id) {
+      throw new EspoAuthError(
+        'Signed in, but EspoCRM did not return a user record. Please contact support.',
+        res.status
+      );
+    }
 
     this._authHeader = authHeader;
     this._userName = user.userName || userName;
@@ -78,10 +96,10 @@ class EspoClient {
 
     return {
       id: user.id,
-      userName: user.userName,
-      firstName: user.firstName,
-      lastName: user.lastName,
-      type: user.type
+      userName: user.userName || userName,
+      firstName: user.firstName || '',
+      lastName: user.lastName || '',
+      type: user.type || ''
     };
   }
 
