@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, dialog } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const Store = require('electron-store');
@@ -94,6 +94,81 @@ function createWindow() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Auto-update.
+//
+// 0.2.3 and earlier called checkForUpdatesAndNotify() once, at launch, and
+// relied on autoInstallOnAppQuit. That meant a staff member had to restart
+// once to trigger the check, wait for a silent background download, then quit
+// and reopen — and the assisted NSIS installer put up its own Next/Install
+// wizard on the way. Three steps and a wizard to pick up a bug fix.
+//
+// Now: check at launch AND on a timer, then offer one button. "Restart now"
+// runs the installer silently and relaunches the app itself, so the whole
+// update is a single click with no wizard.
+// ---------------------------------------------------------------------------
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;   // every 30 minutes
+const UPDATE_REMIND_LATER_MS = 60 * 60 * 1000;     // re-ask an hour after "Later"
+
+let updatePromptOpen = false;
+let updateRemindTimer = null;
+
+function promptToInstallUpdate(version) {
+  if (updatePromptOpen) return;
+  updatePromptOpen = true;
+  clearTimeout(updateRemindTimer);
+
+  const options = {
+    type: 'info',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Update ready',
+    message: `RVR Ratings CRM ${version || ''} is ready to install.`.replace('  ', ' '),
+    detail: 'The app will close and reopen on its own — it takes a few seconds. Nothing in the CRM is affected.'
+  };
+
+  const shown = mainWindow && !mainWindow.isDestroyed()
+    ? dialog.showMessageBox(mainWindow, options)
+    : dialog.showMessageBox(options);
+
+  shown
+    .then((result) => {
+      updatePromptOpen = false;
+      if (result.response === 0) {
+        // isSilent: true skips the NSIS wizard; isForceRunAfter: true reopens
+        // the app once it's done. Deferred to the next tick so the dialog is
+        // fully closed before the app starts tearing down.
+        setImmediate(() => autoUpdater.quitAndInstall(true, true));
+        return;
+      }
+      // "Later" — the update is already downloaded and autoInstallOnAppQuit
+      // stays on, so quitting normally still applies it. Ask again in an hour
+      // in case they leave the app open for days.
+      updateRemindTimer = setTimeout(() => promptToInstallUpdate(version), UPDATE_REMIND_LATER_MS);
+    })
+    .catch(() => { updatePromptOpen = false; });
+}
+
+function initAutoUpdate() {
+  // Never check in dev — it would try to read a release feed for a version
+  // that doesn't exist and log noise on every run.
+  if (process.env.NODE_ENV && process.env.NODE_ENV !== 'production') return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-downloaded', (info) => promptToInstallUpdate(info && info.version));
+
+  // Non-fatal by design: no network, GitHub briefly unreachable, or a rate
+  // limit should never interrupt someone mid-case. The next timer tick retries.
+  autoUpdater.on('error', () => {});
+
+  const check = () => { autoUpdater.checkForUpdates().catch(() => {}); };
+  check();
+  setInterval(check, UPDATE_CHECK_INTERVAL_MS);
+}
+
 app.whenReady().then(() => {
   createWindow();
 
@@ -105,12 +180,7 @@ app.whenReady().then(() => {
     callback(permission === 'geolocation');
   });
 
-  if (!process.env.NODE_ENV || process.env.NODE_ENV === 'production') {
-    autoUpdater.checkForUpdatesAndNotify().catch(() => {
-      // Non-fatal — the app should still be usable if the update check fails
-      // (e.g. no network, GitHub Releases briefly unreachable).
-    });
-  }
+  initAutoUpdate();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
