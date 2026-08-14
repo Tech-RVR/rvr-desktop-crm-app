@@ -104,13 +104,31 @@ async function renderLoginScreen() {
     }
 
     state.user = res.user;
-    document.getElementById('login-screen').style.display = 'none';
+    const loginScreen = document.getElementById('login-screen');
+    loginScreen.style.display = 'none';
     // The app shell's own CSS class (.app) sets `display:grid` for the
     // topbar-spans-full-width layout — must match that here, not the old
     // pre-restyle 'flex' value, or this inline style wins (higher
     // specificity than the stylesheet rule) and silently breaks the grid.
-    document.getElementById('app-shell').style.display = 'grid';
-    initAppShell();
+    const appShell = document.getElementById('app-shell');
+    appShell.style.display = 'grid';
+
+    // If the shell fails to build, put the user back on the login screen with
+    // a message rather than leaving them on a blank window. 0.2.1 shipped
+    // without this: initAppShell threw, the login screen was already hidden,
+    // and staff saw an empty app with no way to retry.
+    try {
+      initAppShell();
+    } catch (err) {
+      appShell.style.display = 'none';
+      loginScreen.style.display = '';
+      showStatus('Signed in, but the app failed to load. Please try again.', 'err');
+      window.rvr.app.reportRendererError({
+        errorMessage: err && err.message ? err.message : String(err),
+        stackTrace: err && err.stack ? err.stack : '(no stack trace)',
+        userAction: 'Building the app shell immediately after a successful sign-in'
+      });
+    }
   }
 
   submitBtn.addEventListener('click', doLogin);
@@ -129,10 +147,17 @@ async function renderLoginScreen() {
 // App shell: sidebar, topbar, module router
 // ---------------------------------------------------------------------------
 function initAppShell() {
-  const fullName = `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName;
+  // Never let an incomplete user record take the whole shell down — this is
+  // the first thing that runs after login, so anything that throws here
+  // leaves the user staring at a blank window with no way forward.
+  const user = state.user || {};
+  const fullName =
+    `${user.firstName || ''} ${user.lastName || ''}`.trim() ||
+    user.userName ||
+    'Signed in';
   document.getElementById('topbar-user').textContent = fullName;
   const avatarEl = document.getElementById('topbar-avatar');
-  avatarEl.textContent = fullName.trim().charAt(0).toUpperCase() || '?';
+  avatarEl.textContent = fullName.charAt(0).toUpperCase() || '?';
   avatarEl.title = fullName;
 
   const nav = document.getElementById('sidebar-nav');
