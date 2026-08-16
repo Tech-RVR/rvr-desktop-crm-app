@@ -18,6 +18,7 @@
       <div class="kpis" id="dash-kpis"><div class="loading-state">Loading…</div></div>
       <div class="panel">
         <h2>Cases by stage</h2>
+        <p style="color:var(--muted); font-size:12px; margin:-8px 0 12px;"><span class="legend-swatch team-case"></span> Team case — assigned to a colleague, shown here so you can see how far it's got.</p>
         <div class="kanban" id="dash-mini-board"><div class="loading-state">Loading…</div></div>
       </div>
     `;
@@ -30,7 +31,7 @@
       // query) rather than four separate round trips.
       const res = await window.rvr.espo.request('Case', {
         query: {
-          select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving',
+          select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving,assignedUserId,assignedUserName',
           maxSize: 200
         }
       });
@@ -43,8 +44,12 @@
 
       const cases = (res.data && res.data.list) || [];
       const isClosed = (c) => (c.cCaseStage || '').startsWith('Closed');
+      const myId = ctx.user && ctx.user.id;
+      const isMine = (c) => c.assignedUserId === myId;
 
-      const openCount = cases.filter((c) => !isClosed(c)).length;
+      const openCases = cases.filter((c) => !isClosed(c));
+      const openCount = openCases.length;
+      const myOpenCount = openCases.filter(isMine).length;
 
       const annualSavings = cases
         .filter((c) => c.cCaseStage === 'Closed')
@@ -66,7 +71,7 @@
         <div class="kpi">
           <div class="label">Open Cases</div>
           <div class="value">${openCount}</div>
-          <div class="delta">visible to your account</div>
+          <div class="delta">${myOpenCount} yours &middot; ${openCount - myOpenCount} team's</div>
         </div>
         <div class="kpi">
           <div class="label">Annual Savings Secured</div>
@@ -109,9 +114,10 @@
           <div class="kanban-col">
             <h3>${ctx.escapeHtml(stage)} (${stageCases.length})</h3>
             ${stageCases.slice(0, 4).map((c) => `
-              <div class="kanban-card clickable-row" data-case-id="${ctx.escapeHtml(c.id)}">
+              <div class="kanban-card clickable-row${isMine(c) ? '' : ' team-case'}" data-case-id="${ctx.escapeHtml(c.id)}">
                 <div class="case-number">#${ctx.escapeHtml(c.number)}</div>
                 <div class="case-contact">${ctx.escapeHtml(c.contactName || 'No contact linked')}</div>
+                ${isMine(c) ? '' : `<div class="case-assignee">${ctx.escapeHtml(c.assignedUserName || 'Unclaimed')}</div>`}
               </div>
             `).join('') || '<div style="color:var(--muted); font-size:12px; padding:6px 8px;">Empty</div>'}
             ${stageCases.length > 4 ? `<div style="color:var(--muted); font-size:11px; padding:2px 8px;">+${stageCases.length - 4} more</div>` : ''}
