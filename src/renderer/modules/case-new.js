@@ -15,10 +15,29 @@
  */
 
 (function () {
-  const RELIEF_TYPES = [
-    'SBRR', 'Retail/Hospitality/Leisure', 'Empty Property', 'Charitable',
-    'Rural', 'Improvement', 'Heat Network', 'Exemption', 'None'
+  // Fallback only. These MUST match the cReliefType enum in EspoCRM exactly —
+  // the API rejects anything else with a 400 "validation failure" and the user
+  // just sees the save fail. 0.2.4 shipped with abbreviated labels taken from a
+  // stale project doc, so every relief type chosen here was rejected.
+  // The real list is fetched from Metadata at render time (see loadReliefTypes)
+  // so it can never drift out of sync with the CRM again.
+  const RELIEF_TYPES_FALLBACK = [
+    'Small Business Rate Relief (SBRR)', 'Retail, Hospitality & Leisure Relief',
+    'Empty Property Relief', 'Charitable Relief', 'Rural Rate Relief',
+    'Improvement Relief', 'Heat Network Relief', 'Exemption', 'None'
   ];
+
+  async function loadReliefTypes() {
+    try {
+      const res = await window.rvr.espo.request('Metadata');
+      const opts = res && res.ok && res.data && res.data.entityDefs
+        && res.data.entityDefs.Case && res.data.entityDefs.Case.fields
+        && res.data.entityDefs.Case.fields.cReliefType
+        && res.data.entityDefs.Case.fields.cReliefType.options;
+      if (Array.isArray(opts) && opts.length) return opts;
+    } catch (err) { /* fall through to the baked-in list */ }
+    return RELIEF_TYPES_FALLBACK;
+  }
 
   // Every new case starts at the top of the 12-stage pipeline. Stage is
   // deliberately not user-editable here — moving a case on is a decision made
@@ -81,7 +100,7 @@
           <label for="nc-relief">Relief type being considered</label>
           <select id="nc-relief">
             <option value="">Not decided yet</option>
-            ${RELIEF_TYPES.map((r) => `<option value="${ctx.escapeHtml(r)}">${ctx.escapeHtml(r)}</option>`).join('')}
+            ${RELIEF_TYPES_FALLBACK.map((r) => `<option value="${ctx.escapeHtml(r)}">${ctx.escapeHtml(r)}</option>`).join('')}
           </select>
         </div>
         <div class="field">
@@ -152,6 +171,14 @@
     }
 
     fillContacts(await searchContacts(''));
+
+    // Replace the baked-in relief options with whatever the CRM actually has.
+    const reliefEl = el('nc-relief');
+    const reliefOpts = await loadReliefTypes();
+    if (!ctx.isStale() && reliefOpts.join('|') !== RELIEF_TYPES_FALLBACK.join('|')) {
+      reliefEl.innerHTML = '<option value="">Not decided yet</option>' +
+        reliefOpts.map((r) => `<option value="${ctx.escapeHtml(r)}">${ctx.escapeHtml(r)}</option>`).join('');
+    }
 
     // Debounced so a fast typist doesn't fire a request per keystroke, and
     // guarded by a sequence number so a slow earlier search can never
