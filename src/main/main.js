@@ -231,6 +231,24 @@ ipcMain.handle('espo:request', async (_event, { path: reqPath, method, query, bo
   }
 });
 
+ipcMain.handle('espo:downloadFile', async (_event, { fileId, fileName }) => {
+  try {
+    const buffer = await espo.downloadFile(fileId);
+    const saveResult = await dialog.showSaveDialog(mainWindow, {
+      defaultPath: fileName || 'document',
+      title: 'Save document'
+    });
+    if (saveResult.canceled || !saveResult.filePath) {
+      return { ok: false, canceled: true };
+    }
+    require('fs').writeFileSync(saveResult.filePath, buffer);
+    return { ok: true, path: saveResult.filePath };
+  } catch (err) {
+    const status = err instanceof EspoAuthError ? err.status : undefined;
+    return { ok: false, message: err.message, status };
+  }
+});
+
 ipcMain.handle('claimPool:list', async () => {
   const res = await n8nClient.listClaimableCases();
   return res;

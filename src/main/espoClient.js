@@ -154,6 +154,34 @@ class EspoClient {
     if (res.status === 204) return null;
     return res.json();
   }
+
+  /**
+   * Downloads an Attachment's raw file bytes, using the logged-in user's own
+   * credentials (so it's governed by the same Document ACL as everything
+   * else — a caseworker can only download a file on a case they can see).
+   * Returns a Node Buffer; the renderer never touches the auth header.
+   */
+  async downloadFile(fileId) {
+    if (!this._authHeader) {
+      throw new EspoAuthError('Not logged in.', 401);
+    }
+
+    const res = await fetch(`${BASE_URL}/Attachment/file/${encodeURIComponent(fileId)}`, {
+      method: 'GET',
+      headers: { Authorization: this._authHeader }
+    });
+
+    if (res.status === 401) {
+      this.logout();
+      throw new EspoAuthError('Your session has expired. Please log in again.', 401);
+    }
+    if (!res.ok) {
+      throw new EspoAuthError(`Could not download that file (HTTP ${res.status}).`, res.status);
+    }
+
+    const arrayBuffer = await res.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
 }
 
 module.exports = { EspoClient, EspoAuthError, BASE_URL };

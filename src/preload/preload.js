@@ -17,7 +17,11 @@ contextBridge.exposeInMainWorld('rvr', {
   espo: {
     // Generic authenticated EspoCRM request, e.g.:
     //   window.rvr.espo.request('Case', { query: { maxSize: 20 } })
-    request: (path, opts) => ipcRenderer.invoke('espo:request', { path, ...(opts || {}) })
+    request: (path, opts) => ipcRenderer.invoke('espo:request', { path, ...(opts || {}) }),
+    // Downloads an Attachment's file bytes using the logged-in user's own
+    // credentials and prompts a native Save dialog. The auth header never
+    // reaches the renderer.
+    downloadFile: (fileId, fileName) => ipcRenderer.invoke('espo:downloadFile', { fileId, fileName })
   },
   claimPool: {
     list: () => ipcRenderer.invoke('claimPool:list'),

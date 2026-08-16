@@ -17,6 +17,195 @@
     'Savings Confirmation'
   ];
 
+  // Every document on a case — client-uploaded and staff-uploaded — shown in
+  // one place, per Tyrone's request: "if they need to pull up someones file
+  // they can accsess all the documents from the app that are for that file."
+  // No new backend needed here: EspoCRM's own Document ACL (mirrored to each
+  // role's Case scope) already governs what a given staff member can see,
+  // same as every other screen in this app.
+  function reviewPillClass(status) {
+    if (status === 'Verified') return 'good';
+    if (status === 'Rejected') return 'bad';
+    return 'warn';
+  }
+
+  function sourceBadgeClass(source) {
+    return source === 'Client Upload' ? 'client' : 'staff';
+  }
+
+  function uploaderLabel(d) {
+    if (d.cSource === 'Client Upload') {
+      return d.cUploadedByContactName || 'Client';
+    }
+    return d.createdByName || d.assignedUserName || 'Staff';
+  }
+
+  function renderDocumentsList(documents, ctx) {
+    if (!documents.length) {
+      return '<div class="empty-state">No documents uploaded on this case yet.</div>';
+    }
+    return documents.map((d) => {
+      const pending = d.cReviewStatus === 'Pending Review';
+      return `
+        <div class="doc-row ${pending ? 'pending-highlight' : ''}" data-doc-id="${ctx.escapeHtml(d.id)}">
+          <div class="doc-main">
+            <div class="doc-cat">
+              <span class="doc-source-badge ${sourceBadgeClass(d.cSource)}">${d.cSource === 'Client Upload' ? 'Client' : 'Staff'}</span>
+              ${ctx.escapeHtml(d.cCategory || d.name || 'Document')}
+            </div>
+            <div class="doc-meta">Uploaded by ${ctx.escapeHtml(uploaderLabel(d))} &middot; ${formatDate(d.createdAt)}</div>
+          </div>
+          <div class="doc-actions">
+            <span class="pill ${reviewPillClass(d.cReviewStatus)}">${ctx.escapeHtml(d.cReviewStatus || 'Pending Review')}</span>
+            <button class="btn btn-secondary btn-doc-download" data-doc-id="${ctx.escapeHtml(d.id)}" data-file-id="${ctx.escapeHtml(d.fileId || '')}" data-file-name="${ctx.escapeHtml(d.name || 'document')}">Download</button>
+            ${pending ? `<button class="btn btn-ok btn-doc-verify" data-doc-id="${ctx.escapeHtml(d.id)}">Verify</button>` : ''}
+            ${pending ? `<button class="btn btn-danger btn-doc-reject" data-doc-id="${ctx.escapeHtml(d.id)}">Reject</button>` : ''}
+            <button class="btn btn-danger btn-doc-delete" data-doc-id="${ctx.escapeHtml(d.id)}">Delete</button>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  async function wireDocumentsPanel(panel, caseId, ctx) {
+    const listEl = panel.querySelector('#doc-list');
+    const uploadBtn = panel.querySelector('#doc-upload-btn');
+    const categorySelect = panel.querySelector('#doc-upload-category');
+    const fileInput = panel.querySelector('#doc-upload-file');
+    const statusEl = panel.querySelector('#doc-upload-status');
+
+    categorySelect.innerHTML = DOCUMENT_OPTIONS.map((d) => `<option value="${ctx.escapeHtml(d)}">${ctx.escapeHtml(d)}</option>`).join('');
+
+    function showStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = `status-banner show ${kind}`;
+    }
+    function clearStatus() {
+      statusEl.className = 'status-banner';
+    }
+
+    async function loadDocuments() {
+      listEl.innerHTML = '<div class="loading-state">Loading documents…</div>';
+      const res = await window.rvr.espo.request('Document', {
+        query: {
+          'where[0][type]': 'equals',
+          'where[0][attribute]': 'cCaseId',
+          'where[0][value]': caseId,
+          orderBy: 'createdAt',
+          order: 'desc',
+          maxSize: 100
+        }
+      });
+      if (!res.ok) {
+        listEl.innerHTML = `<div class="empty-state">Could not load documents (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
+        return;
+      }
+      const documents = (res.data && res.data.list) || [];
+      listEl.innerHTML = renderDocumentsList(documents, ctx);
+      wireRowActions();
+    }
+
+    function wireRowActions() {
+      listEl.querySelectorAll('.btn-doc-download').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const fileId = btn.dataset.fileId;
+          const fileName = btn.dataset.fileName;
+          if (!fileId) { showStatus('This document has no file attached.', 'err'); return; }
+          btn.disabled = true;
+          const res = await window.rvr.espo.downloadFile(fileId, fileName);
+          btn.disabled = false;
+          if (res.ok) {
+            showStatus(`Saved to ${res.path}`, 'ok');
+          } else if (!res.canceled) {
+            showStatus(res.message || 'Could not download that file.', 'err');
+          }
+        });
+      });
+
+      listEl.querySelectorAll('.btn-doc-verify').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const res = await window.rvr.espo.request(`Document/${btn.dataset.docId}`, { method: 'PUT', body: { cReviewStatus: 'Verified' } });
+          if (res.ok) { showStatus('Document verified.', 'ok'); loadDocuments(); }
+          else { showStatus(res.message || 'Could not verify this document.', 'err'); btn.disabled = false; }
+        });
+      });
+
+      listEl.querySelectorAll('.btn-doc-reject').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          const res = await window.rvr.espo.request(`Document/${btn.dataset.docId}`, { method: 'PUT', body: { cReviewStatus: 'Rejected' } });
+          if (res.ok) { showStatus('Document rejected.', 'ok'); loadDocuments(); }
+          else { showStatus(res.message || 'Could not reject this document.', 'err'); btn.disabled = false; }
+        });
+      });
+
+      listEl.querySelectorAll('.btn-doc-delete').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!window.confirm('Delete this document? This can be undone by an admin if needed.')) return;
+          btn.disabled = true;
+          const res = await window.rvr.espo.request(`Document/${btn.dataset.docId}`, { method: 'DELETE' });
+          if (res.ok) { showStatus('Document deleted.', 'ok'); loadDocuments(); }
+          else { showStatus(res.message || 'Could not delete this document — you may not have permission.', 'err'); btn.disabled = false; }
+        });
+      });
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          const comma = result.indexOf(',');
+          resolve(comma > -1 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+
+    uploadBtn.addEventListener('click', async () => {
+      clearStatus();
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) { showStatus('Choose a file to upload.', 'err'); return; }
+      uploadBtn.disabled = true;
+      uploadBtn.textContent = 'Uploading…';
+      try {
+        const fileBase64 = await fileToBase64(file);
+        const mimeType = file.type || 'application/octet-stream';
+        const attachRes = await window.rvr.espo.request('Attachment', {
+          method: 'POST',
+          body: { name: file.name, type: mimeType, role: 'Attachment', relatedType: 'Document', field: 'file', file: `data:${mimeType};base64,${fileBase64}` }
+        });
+        if (!attachRes.ok) { showStatus(attachRes.message || 'Could not upload the file.', 'err'); return; }
+
+        const docRes = await window.rvr.espo.request('Document', {
+          method: 'POST',
+          body: {
+            name: file.name,
+            fileId: attachRes.data.id,
+            cCategory: categorySelect.value,
+            cSource: 'Staff Upload',
+            cReviewStatus: 'Verified',
+            cCaseId: caseId
+          }
+        });
+        if (!docRes.ok) { showStatus(docRes.message || 'Could not save the document.', 'err'); return; }
+
+        showStatus('Document uploaded.', 'ok');
+        fileInput.value = '';
+        await loadDocuments();
+      } catch (e) {
+        showStatus('Could not upload the file.', 'err');
+      } finally {
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Upload';
+      }
+    });
+
+    await loadDocuments();
+  }
+
   function formatCurrency(value) {
     if (value === null || value === undefined || value === '') return '—';
     const num = Number(value);
@@ -128,11 +317,34 @@
         </div>
       </div>
 
+      <div class="panel" id="doc-panel">
+        <h3 class="panel-heading">Documents</h3>
+        <p style="color:var(--muted); font-size:12px; margin-top:-8px;">Every document on this case &mdash; uploaded by the client through the portal, or by staff here. A pending client upload is highlighted until it's verified or rejected.</p>
+        <div class="status-banner" id="doc-upload-status"></div>
+        <div class="doc-upload-row">
+          <div>
+            <label for="doc-upload-category">Document type</label>
+            <select id="doc-upload-category"></select>
+          </div>
+          <div>
+            <label for="doc-upload-file">File</label>
+            <input type="file" id="doc-upload-file">
+          </div>
+          <button class="btn btn-primary" id="doc-upload-btn">Upload</button>
+        </div>
+        <div id="doc-list"><div class="loading-state">Loading documents…</div></div>
+      </div>
+
       <p style="color:var(--muted); font-size:12px;">
-        Open the full record in EspoCRM for editing, file uploads, or the activity stream:
+        Open the full record in EspoCRM for editing or the activity stream:
         <a href="https://crm.rvrratingpartners.co.uk/#Case/view/${encodeURIComponent(caseId)}" target="_blank" rel="noopener">Open in EspoCRM &rarr;</a>
       </p>
     `;
+
+    const docPanel = body.querySelector('#doc-panel');
+    if (docPanel) {
+      await wireDocumentsPanel(docPanel, caseId, ctx);
+    }
   }
 
   window.rvrModules['case-detail'] = { render };

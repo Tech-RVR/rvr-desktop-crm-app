@@ -119,6 +119,10 @@ table.data-table tr.clickable-row.team-case-row:hover{ background:#dfe9f4; }
 .btn-primary:disabled{ opacity:0.5; cursor:not-allowed; }
 .btn-secondary{ background:var(--bg); color:var(--navy); border:1px solid var(--line); }
 .btn-secondary:hover{ background:#eaeef3; }
+.btn-danger{ background:var(--danger-bg); color:var(--danger); border:1px solid rgba(178,59,59,0.25); }
+.btn-danger:hover{ background:#f6d9d9; }
+.btn-ok{ background:var(--ok-bg); color:var(--ok); border:1px solid rgba(30,138,95,0.25); }
+.btn-ok:hover{ background:#d3ecdf; }
 
 .status-banner{
   display:none; padding:12px 14px; border-radius:8px; font-size:13px; line-height:1.5; margin-bottom:16px;
@@ -133,6 +137,22 @@ table.data-table tr.clickable-row.team-case-row:hover{ background:#dfe9f4; }
 .pill.good{ background:var(--ok-bg); color:var(--ok); }
 .pill.bad{ background:var(--danger-bg); color:var(--danger); }
 .pill.neutral{ background:var(--bg); color:var(--muted); }
+.pill.warn{ background:var(--warn-bg); color:var(--warn); }
+
+/* ---- Documents panel (case-detail.js) ---- */
+.doc-source-badge{ display:inline-block; padding:2px 8px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; margin-right:6px; }
+.doc-source-badge.client{ background:var(--info-bg); color:var(--info); }
+.doc-source-badge.staff{ background:var(--bg); color:var(--muted); border:1px solid var(--line); }
+.doc-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; margin-bottom:8px; flex-wrap:wrap; }
+.doc-row.pending-highlight{ border-color:rgba(184,134,11,0.4); background:var(--warn-bg); }
+.doc-row .doc-main{ display:flex; flex-direction:column; gap:2px; }
+.doc-row .doc-cat{ font-weight:600; font-size:13px; }
+.doc-row .doc-meta{ font-size:11px; color:var(--muted); }
+.doc-row .doc-actions{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.doc-row .doc-actions button{ padding:5px 10px; font-size:11px; }
+.doc-upload-row{ display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
+.doc-upload-row label{ display:block; font-size:11px; font-weight:600; color:var(--navy); margin-bottom:4px; }
+.doc-upload-row select, .doc-upload-row input[type="file"]{ font-size:12px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
 
 /* ---- Stage badges — one class per cCaseStage value, matching the mockup's
    stage-colour grouping exactly (see shared/stage-badge.js for the map). ---- */
