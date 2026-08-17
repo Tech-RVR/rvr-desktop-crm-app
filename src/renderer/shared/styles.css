@@ -283,3 +283,56 @@ input[type=number], input[type=email], input[type=tel], .form-panel textarea{
 .form-grid{ display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:0 16px; max-width:800px; }
 .form-grid .field{ max-width:none; }
 .form-actions{ display:flex; justify-content:flex-end; gap:10px; margin:4px 0 28px; }
+
+/* ---- Panel heading row (title + inline action, e.g. Case details' Edit btn) ---- */
+.panel-heading-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.panel-heading-row .panel-heading{ margin:0; }
+.btn-sm{ padding:5px 12px; font-size:11.5px; }
+
+/* ---- Notes panel (Case detail) ---- */
+.note-add-row{ display:flex; gap:10px; align-items:flex-start; margin-bottom:14px; }
+.note-add-row textarea{
+  flex:1; font-family:var(--sans); font-size:13px; padding:9px 11px; border:1px solid var(--line);
+  border-radius:6px; background:var(--bg); color:var(--text); resize:vertical; min-height:44px;
+}
+.note-row{ padding:10px 0; border-bottom:1px solid var(--line); }
+.note-row:last-child{ border-bottom:none; }
+.note-row .note-meta{ font-size:11px; color:var(--muted); margin-bottom:3px; }
+.note-row .note-body{ font-size:13px; white-space:pre-wrap; }
+
+/* ---- Client messages panel (Case detail) ---- */
+.message-reply-row{ display:flex; gap:10px; align-items:flex-start; margin-top:12px; }
+.message-reply-row textarea{
+  flex:1; font-family:var(--sans); font-size:13px; padding:9px 11px; border:1px solid var(--line);
+  border-radius:6px; background:var(--bg); color:var(--text); resize:vertical; min-height:44px;
+}
+#messages-thread{ max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:4px 2px; }
+.message-bubble{ max-width:78%; padding:9px 12px; border-radius:10px; font-size:13px; }
+.message-bubble.from-client{ align-self:flex-start; background:var(--info-bg); border-bottom-left-radius:2px; }
+.message-bubble.to-client{ align-self:flex-end; background:var(--bg); border:1px solid var(--line); border-bottom-right-radius:2px; }
+.message-bubble .message-meta{ font-size:10.5px; color:var(--muted); margin-bottom:3px; }
+.message-bubble .message-body{ white-space:pre-wrap; }
+
+/* ---- Messages dashboard (modules/messages.js) ---- */
+tr.unread-row{ font-weight:600; }
+.unread-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent2); }
+td.message-preview{ color:var(--muted); font-weight:400; }
+
+/* ---- Sidebar nav badge (Messages unread count) ---- */
+.nav-item{ position:relative; }
+.nav-badge{
+  margin-left:auto; background:var(--accent); color:#25314a; font-size:10.5px; font-weight:700;
+  border-radius:20px; padding:1px 7px; line-height:1.5;
+}
+.nav-item.active .nav-badge{ background:#25314a; color:var(--accent); }
+
+/* ---- KPI cards that act as a link into another screen (Dashboard) ---- */
+.kpi-clickable{ cursor:pointer; }
+.kpi-clickable:hover{ border-color:var(--accent); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+
+/* ---- Security screen (modules/security.js) — TOTP secret display ---- */
+.totp-secret-box{
+  font-family:ui-monospace, "SF Mono", Consolas, monospace; font-size:15px; letter-spacing:.06em;
+  background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px 14px;
+  margin:10px 0; word-break:break-all; user-select:all;
+}

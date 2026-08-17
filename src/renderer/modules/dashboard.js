@@ -67,6 +67,20 @@
         return new Date(c.cPaymentDueDate) < today;
       }).length;
 
+      // Count-only query (maxSize:1, read the `total` EspoCRM always returns
+      // on a list response) — distinct from "Awaiting Documents" above,
+      // which is about missing checklist categories, not already-uploaded
+      // files sitting unverified. See modules/verification.js.
+      const pendingVerificationRes = await window.rvr.espo.request('Document', {
+        query: {
+          'where[0][type]': 'equals',
+          'where[0][attribute]': 'cReviewStatus',
+          'where[0][value]': 'Pending Review',
+          maxSize: 1
+        }
+      });
+      const pendingVerificationCount = (pendingVerificationRes.ok && pendingVerificationRes.data && pendingVerificationRes.data.total) || 0;
+
       container.querySelector('#dash-kpis').innerHTML = `
         <div class="kpi">
           <div class="label">Open Cases</div>
@@ -88,7 +102,17 @@
           <div class="value" style="color:var(--danger)">${overdueInvoices}</div>
           <div class="delta" style="color:var(--danger)">past their payment due date</div>
         </div>
+        <div class="kpi kpi-clickable" id="dash-kpi-verification">
+          <div class="label">Pending Verification</div>
+          <div class="value" style="color:var(--warn)">${pendingVerificationCount}</div>
+          <div class="delta">uploaded documents awaiting review &rarr;</div>
+        </div>
       `;
+
+      const verificationKpi = container.querySelector('#dash-kpi-verification');
+      if (verificationKpi) {
+        verificationKpi.addEventListener('click', () => ctx.navigateTo('verification'));
+      }
 
       const stageOrder = window.RVR_STAGE_ORDER || [];
       const byStage = {};

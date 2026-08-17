@@ -9,7 +9,9 @@ const { contextBridge, ipcRenderer } = require('electron');
  */
 contextBridge.exposeInMainWorld('rvr', {
   auth: {
-    login: (userName, password) => ipcRenderer.invoke('auth:login', { userName, password }),
+    // `code` is optional — only sent when the account has EspoCRM's own 2FA
+    // turned on and the login screen is on its second step.
+    login: (userName, password, code) => ipcRenderer.invoke('auth:login', { userName, password, code }),
     logout: () => ipcRenderer.invoke('auth:logout'),
     lastUserName: () => ipcRenderer.invoke('auth:lastUserName'),
     forgotPasswordUrl: () => ipcRenderer.invoke('auth:forgotPasswordUrl')
@@ -38,5 +40,11 @@ contextBridge.exposeInMainWorld('rvr', {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getOsLabel: () => ipcRenderer.invoke('app:getOsLabel'),
     reportRendererError: (payload) => ipcRenderer.invoke('app:reportRendererError', payload)
+  },
+  messages: {
+    // Local-only "what have I already seen" tracking for the Messages
+    // screen's unread badge — see main.js's Store defaults comment.
+    getSeen: () => ipcRenderer.invoke('messages:getSeen'),
+    setSeen: (caseId, timestamp) => ipcRenderer.invoke('messages:setSeen', { caseId, timestamp })
   }
 });

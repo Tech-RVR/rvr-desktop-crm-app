@@ -13,13 +13,17 @@ const MODULES = [
   { id: 'cases', label: 'Cases', icon: '\u{1F4C1}' },
   { id: 'case-new', label: 'New Case', icon: '\u{2795}' },
   { id: 'pipeline', label: 'Pipeline', icon: '\u{1F9ED}' },
-  { id: 'contacts', label: 'Contacts', icon: '\u{1F464}' }
+  { id: 'contacts', label: 'Contacts', icon: '\u{1F464}' },
+  { id: 'messages', label: 'Messages', icon: '\u{1F4AC}', badgeId: 'messages-badge' },
+  { id: 'verification', label: 'Verification', icon: '\u{2705}' },
+  { id: 'security', label: 'Security', icon: '\u{1F510}' }
 ];
 
-// Sidebar entries that are actions rather than lists. They still get a nav
-// button, but they must never become the "back" target for Case detail —
-// going back from a case into a blank creation form reads as a bug.
-const NON_LIST_MODULES = ['case-new'];
+// Sidebar entries that are actions/personal-settings rather than lists. They
+// still get a nav button, but they must never become the "back" target for
+// Case detail — going back from a case into a blank creation form (or a
+// personal Security screen that never linked to a case) reads as a bug.
+const NON_LIST_MODULES = ['case-new', 'security'];
 
 const state = {
   user: null,
@@ -63,15 +67,21 @@ async function renderLoginScreen() {
   container.innerHTML = `
     <div class="login-card">
       <h1>RVR Ratings CRM</h1>
-      <div class="subtitle">Sign in with your EspoCRM account</div>
+      <div class="subtitle" id="login-subtitle">Sign in with your EspoCRM account</div>
       <div class="status-banner" id="login-status"></div>
-      <div class="field">
-        <label for="login-username">Username</label>
-        <input type="text" id="login-username" value="${escapeHtml(lastUserName)}" autocomplete="username">
+      <div id="login-step-credentials">
+        <div class="field">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" value="${escapeHtml(lastUserName)}" autocomplete="username">
+        </div>
+        <div class="field">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" autocomplete="current-password">
+        </div>
       </div>
-      <div class="field">
-        <label for="login-password">Password</label>
-        <input type="password" id="login-password" autocomplete="current-password">
+      <div class="field" id="login-step-code" style="display:none;">
+        <label for="login-code">Authenticator code</label>
+        <input type="text" id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="6-digit code">
       </div>
       <button class="btn btn-primary" id="login-submit">Sign in</button>
       <div class="forgot-link"><a id="login-forgot">Forgot password?</a></div>
@@ -80,31 +90,75 @@ async function renderLoginScreen() {
 
   const usernameEl = document.getElementById('login-username');
   const passwordEl = document.getElementById('login-password');
+  const codeEl = document.getElementById('login-code');
   const statusEl = document.getElementById('login-status');
   const submitBtn = document.getElementById('login-submit');
+  const subtitleEl = document.getElementById('login-subtitle');
+  const credentialsStepEl = document.getElementById('login-step-credentials');
+  const codeStepEl = document.getElementById('login-step-code');
+
+  // Two-factor accounts: EspoCRM answers a code-less login with a distinct
+  // "second step required" signal rather than a plain failure (see
+  // espoClient.js's login() for the full explanation). When that happens we
+  // don't treat it as a wrong password — we swap to a code prompt and keep
+  // the same username/password in memory for the follow-up request, exactly
+  // as if the user had typed the code the first time.
+  let awaitingCode = false;
 
   function showStatus(msg, kind) {
     statusEl.textContent = msg;
     statusEl.className = `status-banner show ${kind}`;
   }
 
+  function enterCodeStep() {
+    awaitingCode = true;
+    credentialsStepEl.style.display = 'none';
+    codeStepEl.style.display = '';
+    subtitleEl.textContent = 'Enter the code from your authenticator app';
+    codeEl.value = '';
+    codeEl.focus();
+  }
+
   async function doLogin() {
     const userName = usernameEl.value.trim();
     const password = passwordEl.value;
-    if (!userName || !password) {
+    const code = codeEl.value.trim();
+
+    if (!awaitingCode && (!userName || !password)) {
       showStatus('Please enter your username and password.', 'err');
       return;
     }
+    if (awaitingCode && !code) {
+      showStatus('Enter the 6-digit code from your authenticator app.', 'err');
+      return;
+    }
+
     submitBtn.disabled = true;
     submitBtn.textContent = 'Signing in…';
     statusEl.className = 'status-banner';
 
-    const res = await window.rvr.auth.login(userName, password);
+    const res = await window.rvr.auth.login(userName, password, awaitingCode ? code : undefined);
 
     submitBtn.disabled = false;
     submitBtn.textContent = 'Sign in';
 
     if (!res.ok) {
+      if (res.secondStepRequired) {
+        if (!awaitingCode) {
+          enterCodeStep();
+        } else {
+          showStatus(res.message || 'That code was not accepted. Please try again.', 'err');
+        }
+        return;
+      }
+      // A genuine failure resets back to the credentials step so a mistyped
+      // password doesn't strand someone on a code prompt with no way back.
+      if (awaitingCode) {
+        awaitingCode = false;
+        credentialsStepEl.style.display = '';
+        codeStepEl.style.display = 'none';
+        subtitleEl.textContent = 'Sign in with your EspoCRM account';
+      }
       showStatus(res.message || 'Sign in failed. Please try again.', 'err');
       return;
     }
@@ -139,6 +193,7 @@ async function renderLoginScreen() {
 
   submitBtn.addEventListener('click', doLogin);
   passwordEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  codeEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
 
   document.getElementById('login-forgot').addEventListener('click', async () => {
     const url = await window.rvr.auth.forgotPasswordUrl();
@@ -172,12 +227,16 @@ function initAppShell() {
     const btn = document.createElement('button');
     btn.className = 'nav-item';
     btn.dataset.moduleId = mod.id;
-    btn.innerHTML = `<span class="nav-icon">${mod.icon}</span><span>${escapeHtml(mod.label)}</span>`;
+    btn.innerHTML = `
+      <span class="nav-icon">${mod.icon}</span><span>${escapeHtml(mod.label)}</span>
+      ${mod.badgeId ? `<span class="nav-badge" id="${mod.badgeId}" style="display:none;"></span>` : ''}
+    `;
     btn.addEventListener('click', () => navigateTo(mod.id));
     nav.appendChild(btn);
   });
 
   document.getElementById('sidebar-logout').addEventListener('click', async () => {
+    clearInterval(messagesPollTimer);
     await window.rvr.auth.logout();
     window.location.reload();
   });
@@ -187,7 +246,69 @@ function initAppShell() {
 
   renderClockWidget();
   navigateTo(state.activeModule);
+  startMessagesPolling();
 }
+
+// ---------------------------------------------------------------------------
+// Messages unread badge — a lightweight poll while the app is open, not a
+// true push notification (the app has no push infrastructure to build on;
+// this was the deliberately-chosen tradeoff — see the Messages dashboard
+// module for the full explanation). Silently shows no badge on a 403 rather
+// than erroring, same as every other screen's permission handling in this
+// app — that 403 is expected until the CPortalMessage staff ACL grant lands
+// (see infrastructure-status.md).
+// ---------------------------------------------------------------------------
+const MESSAGES_POLL_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes
+let messagesPollTimer = null;
+
+async function refreshMessagesBadge() {
+  const badge = document.getElementById('messages-badge');
+  if (!badge) return; // shell not built, or user has navigated away from it
+
+  const res = await window.rvr.espo.request('CPortalMessage', {
+    query: {
+      select: 'caseId,createdAt,direction',
+      'where[0][type]': 'equals',
+      'where[0][attribute]': 'direction',
+      'where[0][value]': 'From Client',
+      orderBy: 'createdAt',
+      order: 'desc',
+      maxSize: 200
+    }
+  });
+  if (!res.ok) { badge.style.display = 'none'; return; }
+
+  const seenMap = (await window.rvr.messages.getSeen()) || {};
+  const newestByCase = {};
+  ((res.data && res.data.list) || []).forEach((m) => {
+    if (!m.caseId) return;
+    if (!newestByCase[m.caseId] || new Date(m.createdAt) > new Date(newestByCase[m.caseId])) {
+      newestByCase[m.caseId] = m.createdAt;
+    }
+  });
+  const unreadCaseCount = Object.keys(newestByCase).filter((caseId) => {
+    const seenAt = seenMap[caseId];
+    return !seenAt || new Date(newestByCase[caseId]) > new Date(seenAt);
+  }).length;
+
+  if (unreadCaseCount > 0) {
+    badge.textContent = unreadCaseCount > 99 ? '99+' : String(unreadCaseCount);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
+function startMessagesPolling() {
+  refreshMessagesBadge();
+  clearInterval(messagesPollTimer);
+  messagesPollTimer = setInterval(refreshMessagesBadge, MESSAGES_POLL_INTERVAL_MS);
+}
+
+// Exposed so case-detail.js and messages.js can trigger an immediate
+// refresh right after the user reads/replies to a case's messages, rather
+// than leaving the badge stale until the next poll tick.
+window.rvrRefreshMessagesBadge = () => refreshMessagesBadge();
 
 // Incremented on every navigation. A module's render() is async — it paints a
 // skeleton, awaits an EspoCRM call, then fills in the result. If the user

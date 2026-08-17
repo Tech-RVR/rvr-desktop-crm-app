@@ -50,20 +50,51 @@ class EspoClient {
    * Attempt to log in with a real EspoCRM username/password.
    * Confirms the credentials by calling GET /App/user, which EspoCRM only
    * answers successfully for a genuinely authenticated request.
+   *
+   * `code` is an optional TOTP code for accounts with EspoCRM's own
+   * two-factor authentication turned on (Administration > 2FA is per-user
+   * self-service, confirmed live 2026-08-17 against EspoCRM's own source:
+   * application/Espo/Core/Api/Auth.php's handleSecondStepRequired()). When a
+   * 2FA-enabled account logs in WITHOUT a code, EspoCRM returns HTTP 401 with
+   * a distinct `X-Status-Reason: second-step-required` header (not a generic
+   * "wrong credentials" failure) — that's what lets the login screen tell
+   * "needs a code" apart from "wrong password" and prompt accordingly rather
+   * than showing a confusing error. The code, once known, is sent as its own
+   * header (`Espo-Authorization-Code`) alongside the same Basic Auth header,
+   * verified fresh on every request since this app doesn't keep a session.
+   *
+   * This only ever affects real human logins: EspoCRM's 2FA enrollment
+   * (Tools/UserSecurity/Service.php) only allows admin/regular users to set
+   * it up on their own account — API-key/automation users structurally can't
+   * have 2FA applied to them, so this can never touch the n8n/portal-proxy
+   * credentials.
    */
-  async login(userName, password) {
+  async login(userName, password, code) {
     if (!userName || !password) {
       throw new EspoAuthError('Username and password are required.', 400);
     }
 
     const authHeader = 'Basic ' + Buffer.from(`${userName}:${password}`).toString('base64');
+    const headers = { Authorization: authHeader };
+    if (code) headers['Espo-Authorization-Code'] = code;
 
     const res = await fetch(`${BASE_URL}/App/user`, {
       method: 'GET',
-      headers: { Authorization: authHeader }
+      headers
     });
 
     if (res.status === 401 || res.status === 403) {
+      const reason = res.headers.get('X-Status-Reason');
+      if (reason === 'second-step-required') {
+        const err = new EspoAuthError(
+          code
+            ? 'That code was not accepted. Please try the current code from your authenticator app.'
+            : 'Enter the 6-digit code from your authenticator app.',
+          res.status
+        );
+        err.secondStepRequired = true;
+        throw err;
+      }
       throw new EspoAuthError('Incorrect username or password.', res.status);
     }
     if (!res.ok) {

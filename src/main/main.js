@@ -11,7 +11,13 @@ const { n8nClient } = require('./n8nClient');
 const store = new Store({
   name: 'rvr-crm-preferences',
   // Only non-sensitive preferences live here — never a password or auth token.
-  defaults: { lastUserName: '', windowBounds: null }
+  // seenMessagesAt: { [caseId]: isoTimestamp } — the newest portal-message
+  // createdAt this staff member has actually opened/viewed on that case, used
+  // purely client-side to drive the unread badge/poll (Messages screen).
+  // Per-install, not per-user — acceptable since the app is single-user per
+  // machine login session and this is a convenience indicator, not a source
+  // of truth (EspoCRM's own createdAt timestamps are that).
+  defaults: { lastUserName: '', windowBounds: null, seenMessagesAt: {} }
 });
 
 const espo = new EspoClient();
@@ -196,14 +202,15 @@ app.on('window-all-closed', () => {
 // contextBridge). The renderer never talks to EspoCRM or n8n directly.
 // ---------------------------------------------------------------------------
 
-ipcMain.handle('auth:login', async (_event, { userName, password }) => {
+ipcMain.handle('auth:login', async (_event, { userName, password, code }) => {
   try {
-    const user = await espo.login(userName, password);
+    const user = await espo.login(userName, password, code);
     store.set('lastUserName', userName);
     return { ok: true, user };
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
-    return { ok: false, message: err.message, status };
+    const secondStepRequired = err instanceof EspoAuthError ? !!err.secondStepRequired : false;
+    return { ok: false, message: err.message, status, secondStepRequired };
   }
 });
 
@@ -285,3 +292,22 @@ ipcMain.handle('app:reportRendererError', async (_event, { errorMessage, stackTr
 
 ipcMain.handle('app:getVersion', async () => appVersion);
 ipcMain.handle('app:getOsLabel', async () => getOsLabel());
+
+// ---------------------------------------------------------------------------
+// Local "seen" tracking for the Messages screen's unread badge — purely a
+// per-install convenience (see the Store defaults comment above), never
+// treated as authoritative.
+// ---------------------------------------------------------------------------
+ipcMain.handle('messages:getSeen', async () => store.get('seenMessagesAt') || {});
+
+ipcMain.handle('messages:setSeen', async (_event, { caseId, timestamp }) => {
+  if (!caseId || !timestamp) return { ok: false };
+  const map = store.get('seenMessagesAt') || {};
+  // Only ever move forward — never let an out-of-order call mark an older
+  // message as the "latest seen" and resurrect an already-cleared badge.
+  if (!map[caseId] || new Date(timestamp) > new Date(map[caseId])) {
+    map[caseId] = timestamp;
+    store.set('seenMessagesAt', map);
+  }
+  return { ok: true };
+});
