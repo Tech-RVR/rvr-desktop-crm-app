@@ -620,12 +620,13 @@
         previousValue = newValue;
         pillEl.textContent = newValue;
         pillEl.className = `pill ${signOffPillClass(newValue)}`;
-        showStatus(
-          newValue === 'Requested'
-            ? 'Sign-off requested — the senior caseworkers have been emailed automatically.'
-            : 'Sign-off status updated.',
-          'ok'
-        );
+        let message = 'Sign-off status updated.';
+        if (newValue === 'Requested') {
+          message = 'Sign-off requested — the senior caseworkers have been emailed automatically.';
+        } else if (newValue === 'Approved') {
+          message = 'Sign-off approved — the caseworker has been emailed automatically.';
+        }
+        showStatus(message, 'ok');
       });
     });
   }
