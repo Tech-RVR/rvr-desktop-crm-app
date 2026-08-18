@@ -17,7 +17,7 @@ const store = new Store({
   // Per-install, not per-user — acceptable since the app is single-user per
   // machine login session and this is a convenience indicator, not a source
   // of truth (EspoCRM's own createdAt timestamps are that).
-  defaults: { lastUserName: '', windowBounds: null, seenMessagesAt: {} }
+  defaults: { lastUserName: '', windowBounds: null, seenMessagesAt: {}, onboarding: {} }
 });
 
 const espo = new EspoClient();
@@ -309,5 +309,29 @@ ipcMain.handle('messages:setSeen', async (_event, { caseId, timestamp }) => {
     map[caseId] = timestamp;
     store.set('seenMessagesAt', map);
   }
+  return { ok: true };
+});
+
+// ---------------------------------------------------------------------------
+// Onboarding — first-run tour. Per-user (not per-install, unlike
+// seenMessagesAt above) since whether a given staff member has seen the
+// tour is a property of the person, not the machine — matters specifically
+// for the Surveyor role, where individual accounts rotate through shared
+// machines over time (see the project's surveyor-rolling-role-sop.md).
+// Keyed by EspoCRM user id. Shape per user: { hasSeenTour, dontShowAgain }.
+// (lastSeenVersion / seenFeatureHighlights are reserved for the "what's
+// new on update" follow-up feature — not used yet.)
+// ---------------------------------------------------------------------------
+ipcMain.handle('onboarding:getState', async (_event, { userId }) => {
+  if (!userId) return {};
+  const all = store.get('onboarding') || {};
+  return all[userId] || {};
+});
+
+ipcMain.handle('onboarding:setState', async (_event, { userId, patch }) => {
+  if (!userId || !patch) return { ok: false };
+  const all = store.get('onboarding') || {};
+  all[userId] = { ...(all[userId] || {}), ...patch };
+  store.set('onboarding', all);
   return { ok: true };
 });
