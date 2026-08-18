@@ -46,5 +46,12 @@ contextBridge.exposeInMainWorld('rvr', {
     // screen's unread badge — see main.js's Store defaults comment.
     getSeen: () => ipcRenderer.invoke('messages:getSeen'),
     setSeen: (caseId, timestamp) => ipcRenderer.invoke('messages:setSeen', { caseId, timestamp })
+  },
+  onboarding: {
+    // Per-user first-run tour state — see main.js's onboarding:getState/
+    // setState handlers for why this is keyed by EspoCRM user id rather
+    // than per-install like messages.getSeen above.
+    getState: (userId) => ipcRenderer.invoke('onboarding:getState', { userId }),
+    setState: (userId, patch) => ipcRenderer.invoke('onboarding:setState', { userId, patch })
   }
 });
