@@ -356,9 +356,33 @@
     `;
   }
 
+  // Only relevant when cCaseStage = 'Closed Without Payment - Disputed' -- matches
+  // the cDisputeReason field's options in EspoCRM exactly (Field Manager, added
+  // 2026-08-17). Tick-all-that-apply; the automated client email composes a
+  // paragraph per reason selected. Required server-side (Dynamic Logic +
+  // beforeSaveCustomScript both enforce this) whenever the case moves to that
+  // stage, whether via this app's own PATCH or EspoCRM's own web UI.
+  const DISPUTE_REASON_OPTIONS = [
+  'Client disputes the outcome', 'VOA/council dispute unresolved', 'Internal/fee dispute'
+  ];
+
   async function renderCaseDetailsEditForm(c, reliefOptions) {
+  const currentDisputeReasons = Array.isArray(c.cDisputeReason) ? c.cDisputeReason : [];
+  const disputeReasonHidden = c.cCaseStage !== 'Closed Without Payment - Disputed';
     return `
       <div class="form-grid">
+        <div class="field">
+          <label for="edit-stage">Case stage</label>
+          <select id="edit-stage">
+            ${STAGE_ORDER.map((s) => `<option value="${esc(s)}" ${c.cCaseStage === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+          </select>
+          <span class="field-hint">Moving a case on may be guarded by EspoCRM's own rules (Documents Received, Director-only stages) -- any block comes back as a message below.</span>
+        </div>
+        <div class="field" id="edit-dispute-reason-field" style="${disputeReasonHidden ? 'display:none;' : ''}">
+          <label>Dispute reason(s) <span class="req">*</span></label>
+            ${DISPUTE_REASON_OPTIONS.map((r) => `<label style="display:flex; align-items:center; gap:6px; font-weight:400; margin:4px 0;"><input type="checkbox" class="edit-dispute-reason-cb" value="${esc(r)}" ${currentDisputeReasons.includes(r) ? 'checked' : ''}> ${esc(r)}</label>`).join('')}
+          <span class="field-hint">Tick all that apply -- the client email adapts to match. Required to close a case this way.</span>
+        </div>
         <div class="field">
           <label for="edit-relief">Relief type</label>
           <select id="edit-relief">
@@ -426,6 +450,13 @@
       if (ctx.isStale()) return;
       bodyEl.innerHTML = await renderCaseDetailsEditForm(current, reliefOptions);
 
+      const stageSelect = bodyEl.querySelector('#edit-stage');
+      const disputeReasonField = bodyEl.querySelector('#edit-dispute-reason-field');
+      function syncDisputeReasonVisibility() {
+        disputeReasonField.style.display = stageSelect.value === 'Closed Without Payment - Disputed' ? '' : 'none';
+      }
+      stageSelect.addEventListener('change', syncDisputeReasonVisibility);
+
       bodyEl.querySelector('#edit-cancel-btn').addEventListener('click', () => {
         editBtn.style.display = '';
         clearStatus();
@@ -441,7 +472,15 @@
           return;
         }
 
+        const stageVal = bodyEl.querySelector('#edit-stage').value;
+        const disputeReasonsChecked = Array.from(bodyEl.querySelectorAll('.edit-dispute-reason-cb:checked')).map((cb) => cb.value);
+        if (stageVal === 'Closed Without Payment - Disputed' && disputeReasonsChecked.length === 0) {
+          showStatus('Select at least one dispute reason before closing a case this way.', 'err');
+          return;
+        }
+
         const body = {
+          cCaseStage: stageVal,
           cReliefType: bodyEl.querySelector('#edit-relief').value || null,
           cPropertyAddressStreet: bodyEl.querySelector('#edit-street').value.trim(),
           cPropertyAddressCity: bodyEl.querySelector('#edit-city').value.trim(),
@@ -450,6 +489,7 @@
         };
         if (rvBeforeRaw) body.cRateableValueBefore = Number(rvBeforeRaw);
         if (rvAfterRaw) body.cRateableValueAfter = Number(rvAfterRaw);
+        if (stageVal === 'Closed Without Payment - Disputed') body.cDisputeReason = disputeReasonsChecked;
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
