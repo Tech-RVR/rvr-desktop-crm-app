@@ -15,7 +15,7 @@
   }
 
   function formatDate(dtStr) {
-    if (!dtStr) return '—';
+    if (!dtStr) return 'â';
     const d = new Date(dtStr.replace(' ', 'T'));
     if (Number.isNaN(d.getTime())) return dtStr;
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -36,7 +36,7 @@
   }
 
   // Users holding the surveyor role, filtered live via role membership
-  // (not a hardcoded name list) — mirrors the loadAssignableUsers() pattern
+  // (not a hardcoded name list) â mirrors the loadAssignableUsers() pattern
   // in case-detail.js, adapted to filter by role instead of user type.
   async function loadSurveyors() {
     try {
@@ -68,7 +68,7 @@
           orderBy: 'dateStart',
           order: 'asc',
           maxSize: 100,
-          select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus'
+          select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus,cAcceptanceStatus'
         }
       });
       if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
@@ -89,11 +89,11 @@
           ${meetings.map((m) => `
             <tr>
               <td>${ctx.escapeHtml(formatDate(m.dateStart))}</td>
-              <td>${ctx.escapeHtml(formatTime(m.dateStart))}${m.dateEnd ? ` – ${ctx.escapeHtml(formatTime(m.dateEnd))}` : ''}</td>
-              <td>${ctx.escapeHtml(m.assignedUserName || '—')}</td>
-              <td>${ctx.escapeHtml(m.cLocation || '—')}</td>
-              <td>${m.parentType === 'Case' && m.parentName ? ctx.escapeHtml(m.parentName) : '—'}</td>
-              <td><span class="${acceptancePillClass(m.acceptanceStatus)}">${ctx.escapeHtml(m.acceptanceStatus || 'None')}</span></td>
+              <td>${ctx.escapeHtml(formatTime(m.dateStart))}${m.dateEnd ? ` â ${ctx.escapeHtml(formatTime(m.dateEnd))}` : ''}</td>
+              <td>${ctx.escapeHtml(m.assignedUserName || 'â')}</td>
+              <td>${ctx.escapeHtml(m.cLocation || 'â')}</td>
+              <td>${m.parentType === 'Case' && m.parentName ? ctx.escapeHtml(m.parentName) : 'â'}</td>
+              <td><span class="${acceptancePillClass(m.cAcceptanceStatus)}">${ctx.escapeHtml((m.cAcceptanceStatus && m.cAcceptanceStatus !== 'None') ? m.cAcceptanceStatus : 'Pending')}</span></td>
               <td>
                 ${ctx.user && m.assignedUserId && ctx.user.id === m.assignedUserId ? `
                   <button class="btn btn-secondary meeting-accept" data-meeting-id="${ctx.escapeHtml(m.id)}">Accept</button>
@@ -134,7 +134,7 @@
           </div>
           <div class="field">
             <label for="cal-surveyor">Surveyor <span class="req">*</span></label>
-            <select id="cal-surveyor"><option value="">Loading surveyors…</option></select>
+            <select id="cal-surveyor"><option value="">Loading surveyorsâ¦</option></select>
           </div>
         </div>
         <div class="field">
@@ -158,7 +158,7 @@
 
       <div class="panel">
         <h3 class="panel-heading">Upcoming Appointments</h3>
-        <div id="cal-list"><div class="loading-state">Loading…</div></div>
+        <div id="cal-list"><div class="loading-state">Loadingâ¦</div></div>
       </div>
     `;
 
@@ -194,21 +194,28 @@
         surveyorSelect.innerHTML = '<option value="">No surveyors found</option>';
         return;
       }
-      surveyorSelect.innerHTML = '<option value="">Select a surveyor…</option>' +
+      surveyorSelect.innerHTML = '<option value="">Select a surveyorâ¦</option>' +
         surveyors.map((u) => `<option value="${ctx.escapeHtml(u.id)}">${ctx.escapeHtml(u.name)}</option>`).join('');
     });
 
     async function setAcceptance(meetingId, status) {
-      const res = await window.rvr.espo.request('Meeting/action/setAcceptanceStatus', {
-        method: 'POST',
-        body: { id: meetingId, status }
+      // Deliberately NOT using Meeting/action/setAcceptanceStatus here: that's a
+      // self-service EspoCRM action which only ever sets the acceptance status of
+      // the currently-authenticated user, and only works if they're an invitee on
+      // the Meeting. That breaks the common case of an Admin/Director acting on a
+      // surveyor's behalf from this screen. cAcceptanceStatus is a plain custom
+      // field, so a normal PATCH lets any authorized user record the response
+      // correctly — this mirrors how the emailed Accept/Decline links work too.
+      const res = await window.rvr.espo.request(`Meeting/${meetingId}`, {
+        method: 'PATCH',
+        body: { cAcceptanceStatus: status }
       });
       if (ctx.isStale()) return;
       if (res && res.ok) refreshList();
     }
 
     async function refreshList() {
-      listEl.innerHTML = '<div class="loading-state">Loading…</div>';
+      listEl.innerHTML = '<div class="loading-state">Loadingâ¦</div>';
       const meetings = await loadUpcomingMeetings();
       if (ctx.isStale()) return;
       listEl.innerHTML = renderTable(meetings, ctx);
@@ -247,7 +254,7 @@
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
       const body = {
-        name: `Site Visit — ${location}`,
+        name: `Site Visit â ${location}`,
         dateStart,
         dateEnd,
         assignedUserId: surveyorId,
@@ -263,8 +270,8 @@
       }
 
       submitBtn.disabled = true;
-      submitBtn.textContent = 'Booking…';
-      showStatus('Booking the appointment…', 'info');
+      submitBtn.textContent = 'Bookingâ¦';
+      showStatus('Booking the appointmentâ¦', 'info');
 
       const res = await window.rvr.espo.request('Meeting', { method: 'POST', body });
 
