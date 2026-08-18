@@ -91,6 +91,29 @@
       </div>
 
       <div class="panel form-panel">
+        <h3 class="panel-heading">New company / contact</h3>
+        <p class="field-hint">Use this only if the client isn't in the CRM yet — pick an existing contact above when you can. These fields are disabled once an existing contact is picked.</p>
+        <div class="form-grid">
+          <div class="field">
+            <label for="nc-new-company">Company name</label>
+            <input type="text" id="nc-new-company" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="nc-new-contact-name">Contact name</label>
+            <input type="text" id="nc-new-contact-name" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="nc-new-phone">Phone number</label>
+            <input type="text" id="nc-new-phone" autocomplete="off">
+          </div>
+          <div class="field">
+            <label for="nc-new-email">Email</label>
+            <input type="email" id="nc-new-email" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel form-panel">
         <h3 class="panel-heading">Case</h3>
         <div class="field">
           <label for="nc-name">Case name <span class="req">*</span></label>
@@ -148,6 +171,18 @@
     const contactSelect = el('nc-contact');
     const searchInput = el('nc-contact-search');
     const submitBtn = el('nc-submit');
+    const newCompanyEl = el('nc-new-company');
+    const newContactNameEl = el('nc-new-contact-name');
+    const newPhoneEl = el('nc-new-phone');
+    const newEmailEl = el('nc-new-email');
+    const newContactFields = [newCompanyEl, newContactNameEl, newPhoneEl, newEmailEl];
+
+    function syncNewContactFieldsState() {
+      const hasExisting = !!contactSelect.value;
+      newContactFields.forEach((field) => { field.disabled = hasExisting; });
+      if (hasExisting) newContactFields.forEach((field) => { field.value = ''; });
+    }
+    contactSelect.addEventListener('change', syncNewContactFieldsState);
 
     function showStatus(msg, kind) {
       statusEl.textContent = msg;
@@ -197,10 +232,11 @@
     });
 
     el('nc-reset').addEventListener('click', () => {
-      ['nc-name', 'nc-rv-before', 'nc-description', 'nc-street', 'nc-city', 'nc-state', 'nc-postcode', 'nc-contact-search']
+      ['nc-name', 'nc-rv-before', 'nc-description', 'nc-street', 'nc-city', 'nc-state', 'nc-postcode', 'nc-contact-search', 'nc-new-company', 'nc-new-contact-name', 'nc-new-phone', 'nc-new-email']
         .forEach((id) => { el(id).value = ''; });
       el('nc-relief').value = '';
       contactSelect.value = '';
+      syncNewContactFieldsState();
       statusEl.className = 'status-banner';
     });
 
@@ -218,14 +254,79 @@
         return;
       }
 
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating…';
+      showStatus('Creating the case…', 'info');
+
       const body = {
         name,
         cCaseStage: INITIAL_STAGE,
         assignedUserId: ctx.user && ctx.user.id
       };
 
-      const contactId = contactSelect.value;
+      let contactId = contactSelect.value;
+      let accountId = '';
+
+      if (!contactId) {
+        const newCompanyName = newCompanyEl.value.trim();
+        const newContactName = newContactNameEl.value.trim();
+        const newPhone = newPhoneEl.value.trim();
+        const newEmail = newEmailEl.value.trim();
+
+        if (newCompanyName || newContactName) {
+          if (newCompanyName) {
+            const existingAccountRes = await window.rvr.espo.request('Account', {
+              query: {
+                'where[0][type]': 'equals',
+                'where[0][attribute]': 'name',
+                'where[0][value]': newCompanyName,
+                select: 'id,name',
+                maxSize: 1
+              }
+            });
+            if (ctx.isStale()) return;
+            if (existingAccountRes.ok && existingAccountRes.data && existingAccountRes.data.list && existingAccountRes.data.list.length) {
+              accountId = existingAccountRes.data.list[0].id;
+            } else {
+              const accountBody = { name: newCompanyName };
+              if (newPhone) accountBody.phoneNumber = newPhone;
+              if (newEmail) accountBody.emailAddress = newEmail;
+              const createAccountRes = await window.rvr.espo.request('Account', { method: 'POST', body: accountBody });
+              if (ctx.isStale()) return;
+              if (!createAccountRes.ok) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Create case';
+                showStatus(createAccountRes.message || 'Could not create the new company record.', 'err');
+                return;
+              }
+              accountId = createAccountRes.data && createAccountRes.data.id;
+            }
+          }
+
+          if (newContactName) {
+            const nameParts = newContactName.split(' ').filter(Boolean);
+            const lastName = nameParts.length > 1 ? nameParts.pop() : newContactName;
+            const firstName = nameParts.join(' ');
+            const contactBody = { lastName };
+            if (firstName) contactBody.firstName = firstName;
+            if (newPhone) contactBody.phoneNumber = newPhone;
+            if (newEmail) contactBody.emailAddress = newEmail;
+            if (accountId) contactBody.accountId = accountId;
+            const createContactRes = await window.rvr.espo.request('Contact', { method: 'POST', body: contactBody });
+            if (ctx.isStale()) return;
+            if (!createContactRes.ok) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Create case';
+              showStatus(createContactRes.message || 'Could not create the new contact record.', 'err');
+              return;
+            }
+            contactId = createContactRes.data && createContactRes.data.id;
+          }
+        }
+      }
+
       if (contactId) body.contactId = contactId;
+      if (accountId) body.accountId = accountId;
 
       const relief = el('nc-relief').value;
       if (relief) body.cReliefType = relief;
@@ -244,10 +345,6 @@
       if (stateVal) body.cPropertyAddressState = stateVal;
       if (postcode) body.cPropertyAddressPostalCode = postcode;
       if (street || city || stateVal || postcode) body.cPropertyAddressCountry = 'United Kingdom';
-
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Creating…';
-      showStatus('Creating the case…', 'info');
 
       const res = await window.rvr.espo.request('Case', { method: 'POST', body });
 
