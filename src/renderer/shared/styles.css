@@ -152,7 +152,12 @@ table.data-table tr.clickable-row.team-case-row:hover{ background:#dfe9f4; }
 .doc-row .doc-actions button{ padding:5px 10px; font-size:11px; }
 .doc-upload-row{ display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-bottom:12px; }
 .doc-upload-row label{ display:block; font-size:11px; font-weight:600; color:var(--navy); margin-bottom:4px; }
-.doc-upload-row select, .doc-upload-row input[type="file"]{ font-size:12px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; }
+.doc-upload-row select, .doc-upload-row input[type="file"], .doc-upload-row input[type="text"]{ font-size:12px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:#fff; width:auto; }
+
+/* ---- Senior Sign-Off panel (case-detail.js) ---- */
+.signoff-list{ display:flex; flex-direction:column; gap:12px; }
+.signoff-row label{ display:block; font-size:11px; font-weight:600; color:var(--navy); margin-bottom:4px; text-transform:none; letter-spacing:0; }
+.signoff-row select{ font-size:12px; padding:5px 8px; width:auto; }
 
 /* ---- Stage badges — one class per cCaseStage value, matching the mockup's
    stage-colour grouping exactly (see shared/stage-badge.js for the map). ---- */
