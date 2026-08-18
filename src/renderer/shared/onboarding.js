@@ -121,10 +121,16 @@
     }
     if (currentUser && currentUser.id) {
       try {
-        await window.rvr.onboarding.setState(currentUser.id, {
-          hasSeenTour: true,
-          dontShowAgain: dontShowAgain
-        });
+        // Only ever set dontShowAgain to true, never explicitly false — a
+        // manual replay (e.g. via the "?" menu) where the box isn't
+        // re-ticked must not silently clear an earlier opt-out. Found by
+        // testing (2026-08-18): replaying the tour and clicking through
+        // without re-checking the box reset a prior true value back to
+        // false. hasSeenTour is always safe to set unconditionally since
+        // it only ever needs to move from false to true.
+        const patch = { hasSeenTour: true };
+        if (dontShowAgain) patch.dontShowAgain = true;
+        await window.rvr.onboarding.setState(currentUser.id, patch);
       } catch (err) {
         // Never let a failed write block the UI from closing cleanly —
         // worst case the tour just offers to run again next login.
