@@ -247,6 +247,10 @@ function initAppShell() {
   renderClockWidget();
   navigateTo(state.activeModule);
   startMessagesPolling();
+  // First-run tour + top-bar help menu — see shared/onboarding.js. Kept
+  // as the very last step here so a broken tour init can never block the
+  // rest of the shell (nav, messages polling, clock widget) from working.
+  if (window.rvrOnboarding) window.rvrOnboarding.init(state.user);
 }
 
 // ---------------------------------------------------------------------------
