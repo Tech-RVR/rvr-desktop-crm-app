@@ -130,7 +130,15 @@ class EspoClient {
       userName: user.userName || userName,
       firstName: user.firstName || '',
       lastName: user.lastName || '',
-      type: user.type || ''
+      type: user.type || '',
+      // Full EspoCRM-computed ACL for this user, straight from the same
+      // GET /App/user response already read above (payload.acl) — not a
+      // new call, not a client-side ACL re-implementation. Used only for
+      // soft, best-effort UI decisions (e.g. which first-run tour steps
+      // are relevant to this person's role, see shared/tour-steps.js) —
+      // EspoCRM's own server-side ACL remains the only real enforcement,
+      // exactly as everywhere else in this app.
+      acl: payload.acl || {}
     };
   }
 
