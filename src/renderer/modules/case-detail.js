@@ -346,6 +346,7 @@
     return `
       <div class="detail-grid">
         <div><label>Contact</label><div>${esc(c.contactName || '—')}</div></div>
+        <div><label>Company</label><div>${esc(c.accountName || '—')}</div></div>
         <div><label>Property address</label><div>${esc(formatAddress(c))}</div></div>
         <div><label>Relief type</label><div>${esc(c.cReliefType || '—')}</div></div>
         <div><label>Rateable value (before)</label><div>${formatCurrency(c.cRateableValueBefore)}</div></div>
@@ -366,11 +367,45 @@
   'Client disputes the outcome', 'VOA/council dispute unresolved', 'Internal/fee dispute'
   ];
 
-  async function renderCaseDetailsEditForm(c, reliefOptions) {
+  async function renderCaseDetailsEditForm(c, reliefOptions, linkedContact, linkedAccount) {
   const currentDisputeReasons = Array.isArray(c.cDisputeReason) ? c.cDisputeReason : [];
   const disputeReasonHidden = c.cCaseStage !== 'Closed Without Payment - Disputed';
     return `
       <div class="form-grid">
+        <div class="field">
+          <label for="edit-contact-search">Find existing contact</label>
+          <input type="text" id="edit-contact-search" placeholder="Type a name, email or phone number…" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="edit-contact-select">Contact</label>
+          <select id="edit-contact-select"><option value="">Loading contacts…</option></select>
+          <span class="field-hint">Pick an existing contact, or leave as “— No contact linked —” and fill in the fields below to add a new one.</span>
+        </div>
+        <div class="field">
+          <label for="edit-contact-name">Contact name</label>
+          <input type="text" id="edit-contact-name" value="${esc(linkedContact ? `${linkedContact.firstName || ''} ${linkedContact.lastName || ''}`.trim() : '')}" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="edit-contact-phone">Contact phone</label>
+          <input type="text" id="edit-contact-phone" value="${esc(linkedContact ? (linkedContact.phoneNumber || '') : '')}" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="edit-contact-email">Contact email</label>
+          <input type="email" id="edit-contact-email" value="${esc(linkedContact ? (linkedContact.emailAddress || '') : '')}" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="edit-company-name">Company name</label>
+          <input type="text" id="edit-company-name" value="${esc(linkedAccount ? (linkedAccount.name || '') : '')}" autocomplete="off">
+          <span class="field-hint">Leave blank for no company. Enter a name to link an existing company of that name or create a new one.</span>
+        </div>
+        <div class="field">
+          <label for="edit-company-phone">Company phone</label>
+          <input type="text" id="edit-company-phone" value="${esc(linkedAccount ? (linkedAccount.phoneNumber || '') : '')}" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="edit-company-email">Company email</label>
+          <input type="email" id="edit-company-email" value="${esc(linkedAccount ? (linkedAccount.emailAddress || '') : '')}" autocomplete="off">
+        </div>
         <div class="field">
           <label for="edit-stage">Case stage</label>
           <select id="edit-stage">
@@ -448,7 +483,116 @@
       bodyEl.innerHTML = '<div class="loading-state">Loading…</div>';
       const reliefOptions = await loadReliefTypes();
       if (ctx.isStale()) return;
-      bodyEl.innerHTML = await renderCaseDetailsEditForm(current, reliefOptions);
+
+      const originalContactId = current.contactId || '';
+      const originalAccountId = current.accountId || '';
+      const linkedContactRes = originalContactId
+        ? await window.rvr.espo.request(`Contact/${originalContactId}`)
+        : null;
+      if (ctx.isStale()) return;
+      const linkedContact = linkedContactRes && linkedContactRes.ok ? linkedContactRes.data : null;
+      const linkedAccountRes = originalAccountId
+        ? await window.rvr.espo.request(`Account/${originalAccountId}`)
+        : null;
+      if (ctx.isStale()) return;
+      const linkedAccount = linkedAccountRes && linkedAccountRes.ok ? linkedAccountRes.data : null;
+
+      bodyEl.innerHTML = await renderCaseDetailsEditForm(current, reliefOptions, linkedContact, linkedAccount);
+
+      // --- Contact search / select -------------------------------------------
+      // Same UX as case-new.js's contact typeahead: a debounced free-text
+      // search box drives a <select> of matches. Selecting a different
+      // existing contact just repoints the Case's contactId at save time --
+      // it never edits that contact's own record. Editing the fields below
+      // while the *currently linked* contact stays selected instead PUTs
+      // those changes onto that Contact. Selecting "-- No contact linked --"
+      // and typing a name creates a brand-new Contact, mirroring case-new.js's
+      // create-or-find logic.
+      const contactSearchInput = bodyEl.querySelector('#edit-contact-search');
+      const contactSelectEl = bodyEl.querySelector('#edit-contact-select');
+      const contactNameEl = bodyEl.querySelector('#edit-contact-name');
+      const contactPhoneEl = bodyEl.querySelector('#edit-contact-phone');
+      const contactEmailEl = bodyEl.querySelector('#edit-contact-email');
+      const companyNameEl = bodyEl.querySelector('#edit-company-name');
+      const companyPhoneEl = bodyEl.querySelector('#edit-company-phone');
+      const companyEmailEl = bodyEl.querySelector('#edit-company-email');
+
+      function contactLabel(rec) {
+        const name = `${rec.firstName || ''} ${rec.lastName || ''}`.trim() || rec.name || '(no name)';
+        return rec.emailAddress ? `${name} — ${rec.emailAddress}` : name;
+      }
+
+      async function searchContactsForEdit(term) {
+        const query = {
+          select: 'firstName,lastName,name,emailAddress,phoneNumber',
+          maxSize: 50,
+          orderBy: 'createdAt',
+          order: 'desc'
+        };
+        if (term) {
+          query['where[0][type]'] = 'textFilter';
+          query['where[0][value]'] = term;
+          query.orderBy = 'name';
+          query.order = 'asc';
+        }
+        const res = await window.rvr.espo.request('Contact', { query });
+        if (!res.ok) return { ok: false, message: res.message };
+        return { ok: true, list: (res.data && res.data.list) || [] };
+      }
+
+      let contactsById = {};
+      if (originalContactId && linkedContact) {
+        contactsById[originalContactId] = Object.assign({ id: originalContactId }, linkedContact);
+      }
+
+      function fillContactSelect(result, preselectId) {
+        if (!result.ok) {
+          contactSelectEl.innerHTML = '<option value="">Could not load contacts</option>';
+          return;
+        }
+        result.list.forEach((rec) => { contactsById[rec.id] = rec; });
+        const options = result.list.slice();
+        if (preselectId && contactsById[preselectId] && !options.some((rec) => rec.id === preselectId)) {
+          options.unshift(contactsById[preselectId]);
+        }
+        contactSelectEl.innerHTML =
+          '<option value="">— No contact linked —</option>' +
+          options.map((rec) => `<option value="${esc(rec.id)}" ${rec.id === preselectId ? 'selected' : ''}>${esc(contactLabel(rec))}</option>`).join('');
+      }
+
+      function applyContactFields(id) {
+        if (id && contactsById[id]) {
+          const rec = contactsById[id];
+          contactNameEl.value = `${rec.firstName || ''} ${rec.lastName || ''}`.trim();
+          contactPhoneEl.value = rec.phoneNumber || '';
+          contactEmailEl.value = rec.emailAddress || '';
+        } else if (!id) {
+          contactNameEl.value = '';
+          contactPhoneEl.value = '';
+          contactEmailEl.value = '';
+        }
+      }
+
+      fillContactSelect(await searchContactsForEdit(''), originalContactId);
+      if (ctx.isStale()) return;
+
+      contactSelectEl.addEventListener('change', () => {
+        applyContactFields(contactSelectEl.value);
+      });
+
+      let contactSearchTimer = null;
+      let contactSearchSeq = 0;
+      contactSearchInput.addEventListener('input', () => {
+        clearTimeout(contactSearchTimer);
+        contactSearchTimer = setTimeout(async () => {
+          const mySeq = ++contactSearchSeq;
+          const prevValue = contactSelectEl.value;
+          contactSelectEl.innerHTML = '<option value="">Searching…</option>';
+          const result = await searchContactsForEdit(contactSearchInput.value.trim());
+          if (mySeq !== contactSearchSeq || ctx.isStale()) return;
+          fillContactSelect(result, prevValue);
+        }, 300);
+      });
 
       const stageSelect = bodyEl.querySelector('#edit-stage');
       const disputeReasonField = bodyEl.querySelector('#edit-dispute-reason-field');
@@ -494,6 +638,113 @@
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
         showStatus('Saving…', 'info');
+
+        // Resolve the Contact/Company panel before touching the Case itself.
+        // Mirrors case-new.js's create-or-find logic, plus two extra branches
+        // for a Case that already has a link: editing the currently-linked
+        // record in place, and switching to a different existing contact
+        // without touching either contact's own fields.
+        async function resolveContactAndAccount() {
+          const selectedContactId = contactSelectEl.value;
+          const contactNameVal = contactNameEl.value.trim();
+          const contactPhoneVal = contactPhoneEl.value.trim();
+          const contactEmailVal = contactEmailEl.value.trim();
+          const companyNameVal = companyNameEl.value.trim();
+          const companyPhoneVal = companyPhoneEl.value.trim();
+          const companyEmailVal = companyEmailEl.value.trim();
+
+          let resolvedAccountId = originalAccountId;
+
+          if (originalAccountId) {
+            if (linkedAccount) {
+              const accountBody = {};
+              if (companyNameVal !== (linkedAccount.name || '')) accountBody.name = companyNameVal;
+              if (companyPhoneVal !== (linkedAccount.phoneNumber || '')) accountBody.phoneNumber = companyPhoneVal;
+              if (companyEmailVal !== (linkedAccount.emailAddress || '')) accountBody.emailAddress = companyEmailVal;
+              if (Object.keys(accountBody).length) {
+                const acctRes = await window.rvr.espo.request(`Account/${originalAccountId}`, { method: 'PUT', body: accountBody });
+                if (ctx.isStale()) return { ok: false, stale: true };
+                if (!acctRes.ok) return { ok: false, message: acctRes.message || 'Could not update the company record.' };
+              }
+            }
+          } else if (companyNameVal) {
+            const existingAccountRes = await window.rvr.espo.request('Account', {
+              query: {
+                'where[0][type]': 'equals',
+                'where[0][attribute]': 'name',
+                'where[0][value]': companyNameVal,
+                select: 'id,name',
+                maxSize: 1
+              }
+            });
+            if (ctx.isStale()) return { ok: false, stale: true };
+            if (existingAccountRes.ok && existingAccountRes.data && existingAccountRes.data.list && existingAccountRes.data.list.length) {
+              resolvedAccountId = existingAccountRes.data.list[0].id;
+            } else {
+              const accountBody = { name: companyNameVal };
+              if (companyPhoneVal) accountBody.phoneNumber = companyPhoneVal;
+              if (companyEmailVal) accountBody.emailAddress = companyEmailVal;
+              const createAccountRes = await window.rvr.espo.request('Account', { method: 'POST', body: accountBody });
+              if (ctx.isStale()) return { ok: false, stale: true };
+              if (!createAccountRes.ok) return { ok: false, message: createAccountRes.message || 'Could not create the new company record.' };
+              resolvedAccountId = createAccountRes.data && createAccountRes.data.id;
+            }
+          }
+
+          let resolvedContactId = originalContactId;
+
+          if (selectedContactId && selectedContactId === originalContactId) {
+            if (linkedContact) {
+              const nameParts = contactNameVal.split(' ').filter(Boolean);
+              const lastName = nameParts.length > 1 ? nameParts.pop() : contactNameVal;
+              const firstName = nameParts.join(' ');
+              const origName = `${linkedContact.firstName || ''} ${linkedContact.lastName || ''}`.trim();
+              const contactBody = {};
+              if (contactNameVal !== origName) {
+                contactBody.lastName = lastName || linkedContact.lastName || '';
+                contactBody.firstName = firstName;
+              }
+              if (contactPhoneVal !== (linkedContact.phoneNumber || '')) contactBody.phoneNumber = contactPhoneVal;
+              if (contactEmailVal !== (linkedContact.emailAddress || '')) contactBody.emailAddress = contactEmailVal;
+              if (Object.keys(contactBody).length) {
+                const contactRes = await window.rvr.espo.request(`Contact/${originalContactId}`, { method: 'PUT', body: contactBody });
+                if (ctx.isStale()) return { ok: false, stale: true };
+                if (!contactRes.ok) return { ok: false, message: contactRes.message || 'Could not update the contact record.' };
+              }
+            }
+            resolvedContactId = selectedContactId;
+          } else if (selectedContactId && selectedContactId !== originalContactId) {
+            resolvedContactId = selectedContactId;
+          } else if (!selectedContactId && contactNameVal) {
+            const nameParts = contactNameVal.split(' ').filter(Boolean);
+            const lastName = nameParts.length > 1 ? nameParts.pop() : contactNameVal;
+            const firstName = nameParts.join(' ');
+            const contactBody = { lastName };
+            if (firstName) contactBody.firstName = firstName;
+            if (contactPhoneVal) contactBody.phoneNumber = contactPhoneVal;
+            if (contactEmailVal) contactBody.emailAddress = contactEmailVal;
+            if (resolvedAccountId) contactBody.accountId = resolvedAccountId;
+            const createContactRes = await window.rvr.espo.request('Contact', { method: 'POST', body: contactBody });
+            if (ctx.isStale()) return { ok: false, stale: true };
+            if (!createContactRes.ok) return { ok: false, message: createContactRes.message || 'Could not create the new contact record.' };
+            resolvedContactId = createContactRes.data && createContactRes.data.id;
+          } else {
+            resolvedContactId = '';
+          }
+
+          return { ok: true, contactId: resolvedContactId, accountId: resolvedAccountId };
+        }
+
+        const resolved = await resolveContactAndAccount();
+        if (resolved.stale) return;
+        if (!resolved.ok) {
+          saveBtn.disabled = false;
+          saveBtn.textContent = 'Save';
+          showStatus(resolved.message || 'Could not save the linked contact/company.', 'err');
+          return;
+        }
+        if (resolved.contactId !== originalContactId) body.contactId = resolved.contactId || null;
+        if (resolved.accountId !== originalAccountId) body.accountId = resolved.accountId || null;
 
         const res = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body });
 
