@@ -19,13 +19,53 @@
     'Closed', 'Closed Without Payment - Disputed'
   ];
 
-  const DOCUMENT_OPTIONS = [
+  // Fallback only — the real options are fetched live from EspoCRM's own
+  // Metadata at render time (see loadDocumentOptions), same principle as
+  // loadReliefTypes below, so this list can never silently drift out of
+  // sync with the CRM's actual cDocumentsReceived / Document.cCategory
+  // enums (e.g. the Fee Agreement + Terms of Engagement merge, or a future
+  // document type being added/renamed in the CRM only).
+  const DOCUMENTS_RECEIVED_FALLBACK = [
     'Business Rates Bill', 'Lease / Tenancy Agreement', 'Letter of Authority (signed)',
-    'Terms of Engagement (signed)', 'Fee Agreement (signed)', 'Floor Plans',
-    'Property Photographs', 'Rental Evidence', 'Comparable Properties Evidence',
+    'Floor Plans', 'Property Photographs', 'Rental Evidence', 'Comparable Properties Evidence',
     'Market Reports', 'VOA / Council Correspondence', 'Council Relief Application Form',
-    'Savings Confirmation'
+    'Savings Confirmation', 'Questionnaire Form', 'Other', 'Fee Agreement & Terms of Engagement (signed)'
   ];
+
+  const DOCUMENT_CATEGORY_FALLBACK = [
+    'Business Rates Bill', 'Lease / Tenancy Agreement', 'Letter of Authority (signed)',
+    'Floor Plans', 'Property Photographs', 'Rental Evidence', 'Comparable Properties Evidence',
+    'Market Reports', 'VOA / Council Correspondence', 'Council Relief Application Form',
+    'Savings Confirmation', 'Other', 'Fee Agreement & Terms of Engagement (signed)', 'Questionnaire Form'
+  ];
+
+  // Fetches the live option lists for both the "Documents received" checklist
+  // (Case.cDocumentsReceived) and the upload-category dropdown
+  // (Document.cCategory) from EspoCRM's Metadata API in one request, falling
+  // back to the baked-in lists above only if that fetch fails (offline, etc).
+  async function loadDocumentOptions() {
+    try {
+      const res = await window.rvr.espo.request('Metadata');
+      if (res && res.ok && res.data && res.data.entityDefs) {
+        const caseFields = res.data.entityDefs.Case && res.data.entityDefs.Case.fields;
+        const docFields = res.data.entityDefs.Document && res.data.entityDefs.Document.fields;
+        const received = caseFields && caseFields.cDocumentsReceived && caseFields.cDocumentsReceived.options;
+        const category = docFields && docFields.cCategory && docFields.cCategory.options;
+        return {
+          received: Array.isArray(received) && received.length ? received : DOCUMENTS_RECEIVED_FALLBACK,
+          category: Array.isArray(category) && category.length ? category : DOCUMENT_CATEGORY_FALLBACK
+        };
+      }
+    } catch (err) { /* fall through to the baked-in lists */ }
+    return { received: DOCUMENTS_RECEIVED_FALLBACK, category: DOCUMENT_CATEGORY_FALLBACK };
+  }
+
+  const SIGNOFF_STAGES = [
+    { field: 'cSeniorSignOffCheck', label: 'Check' },
+    { field: 'cSeniorSignOffChallenge', label: 'Challenge' },
+    { field: 'cSeniorSignOffAppeal', label: 'Appeal' }
+  ];
+  const SIGNOFF_STATUSES = ['Not Requested', 'Requested', 'Approved'];
 
   // Fallback only, mirroring case-new.js's own note on this exact list: the
   // real options are fetched from Metadata at render time so an edit can
@@ -46,6 +86,36 @@
       if (Array.isArray(opts) && opts.length) return opts;
     } catch (err) { /* fall through to the baked-in list */ }
     return RELIEF_TYPES_FALLBACK;
+  }
+
+  // The staff who can be assigned/reassigned a case — real caseworkers only
+  // (EspoCRM User.type "regular"), not the admin/API/portal accounts that
+  // also live in the Users table. Used to populate the "Assigned to"
+  // dropdown on every case, per Tyrone's request that David be able to
+  // reassign any case (unassigned or already assigned) to anyone else.
+  // Falls back to an empty list on failure — the dropdown then degrades to
+  // just showing whoever the case is already assigned to (see
+  // wireAssignPanel), same "don't duplicate EspoCRM's own ACL" principle
+  // used everywhere else in this app: if this staff member's role can't see
+  // the Users list, they simply won't be offered a picker.
+  async function loadAssignableUsers() {
+    try {
+      const res = await window.rvr.espo.request('User', {
+        query: {
+          'where[0][type]': 'equals',
+          'where[0][attribute]': 'type',
+          'where[0][value]': 'regular',
+          'where[1][type]': 'equals',
+          'where[1][attribute]': 'isActive',
+          'where[1][value]': true,
+          orderBy: 'name',
+          maxSize: 200,
+          select: 'id,name'
+        }
+      });
+      if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
+    } catch (err) { /* fall through */ }
+    return [];
   }
 
   // Every document on a case — client-uploaded and staff-uploaded — shown in
@@ -98,14 +168,27 @@
     }).join('');
   }
 
-  async function wireDocumentsPanel(panel, caseId, ctx) {
+  async function wireDocumentsPanel(panel, caseId, ctx, categoryOptions) {
     const listEl = panel.querySelector('#doc-list');
     const uploadBtn = panel.querySelector('#doc-upload-btn');
     const categorySelect = panel.querySelector('#doc-upload-category');
+    const otherSpecifyWrap = panel.querySelector('#doc-upload-other-specify-wrap');
+    const otherSpecifyInput = panel.querySelector('#doc-upload-other-specify');
     const fileInput = panel.querySelector('#doc-upload-file');
     const statusEl = panel.querySelector('#doc-upload-status');
 
-    categorySelect.innerHTML = DOCUMENT_OPTIONS.map((d) => `<option value="${ctx.escapeHtml(d)}">${ctx.escapeHtml(d)}</option>`).join('');
+    categorySelect.innerHTML = categoryOptions.map((d) => `<option value="${ctx.escapeHtml(d)}">${ctx.escapeHtml(d)}</option>`).join('');
+
+    // "Other" needs a free-text "please specify" field, mirroring the same
+    // Dynamic Logic condition set up on Document.cCategoryOtherSpecify in
+    // EspoCRM (visible + required only when Category = Other).
+    function syncOtherSpecifyVisibility() {
+      const isOther = categorySelect.value === 'Other';
+      otherSpecifyWrap.style.display = isOther ? '' : 'none';
+      if (!isOther) otherSpecifyInput.value = '';
+    }
+    categorySelect.addEventListener('change', syncOtherSpecifyVisibility);
+    syncOtherSpecifyVisibility();
 
     function showStatus(msg, kind) {
       statusEl.textContent = msg;
@@ -199,6 +282,11 @@
       clearStatus();
       const file = fileInput.files && fileInput.files[0];
       if (!file) { showStatus('Choose a file to upload.', 'err'); return; }
+      const otherSpecify = otherSpecifyInput.value.trim();
+      if (categorySelect.value === 'Other' && !otherSpecify) {
+        showStatus('Please specify the document type in the box below "Other".', 'err');
+        return;
+      }
       uploadBtn.disabled = true;
       uploadBtn.textContent = 'Uploading…';
       try {
@@ -210,21 +298,26 @@
         });
         if (!attachRes.ok) { showStatus(attachRes.message || 'Could not upload the file.', 'err'); return; }
 
+        const docBody = {
+          name: file.name,
+          fileId: attachRes.data.id,
+          cCategory: categorySelect.value,
+          cSource: 'Staff Upload',
+          cReviewStatus: 'Verified',
+          cCaseId: caseId
+        };
+        if (categorySelect.value === 'Other') docBody.cCategoryOtherSpecify = otherSpecify;
+
         const docRes = await window.rvr.espo.request('Document', {
           method: 'POST',
-          body: {
-            name: file.name,
-            fileId: attachRes.data.id,
-            cCategory: categorySelect.value,
-            cSource: 'Staff Upload',
-            cReviewStatus: 'Verified',
-            cCaseId: caseId
-          }
+          body: docBody
         });
         if (!docRes.ok) { showStatus(docRes.message || 'Could not save the document.', 'err'); return; }
 
         showStatus('Document uploaded.', 'ok');
         fileInput.value = '';
+        otherSpecifyInput.value = '';
+        syncOtherSpecifyVisibility();
         await loadDocuments();
       } catch (e) {
         showStatus('Could not upload the file.', 'err');
@@ -253,7 +346,6 @@
     return `
       <div class="detail-grid">
         <div><label>Contact</label><div>${esc(c.contactName || '—')}</div></div>
-        <div><label>Assigned to</label><div>${esc(c.assignedUserName || 'Unassigned')}</div></div>
         <div><label>Property address</label><div>${esc(formatAddress(c))}</div></div>
         <div><label>Relief type</label><div>${esc(c.cReliefType || '—')}</div></div>
         <div><label>Rateable value (before)</label><div>${formatCurrency(c.cRateableValueBefore)}</div></div>
@@ -386,6 +478,156 @@
 
     editBtn.addEventListener('click', paintEdit);
     paintView();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Assigned to — a standalone dropdown (not gated behind the Case details
+  // Edit toggle above) so David/any staff member can reassign a case to
+  // anyone else in one click, whether it's currently unassigned or already
+  // held by a colleague. PATCHes assignedUserId directly on the Case, same
+  // as every other in-place edit in this app; EspoCRM's own ACL is still the
+  // real gatekeeper (a 403 here just means this role can't reassign).
+  // ---------------------------------------------------------------------------
+  async function wireAssignPanel(panel, initialCase, caseId, ctx) {
+    let currentAssignedId = initialCase.assignedUserId || '';
+    const selectEl = panel.querySelector('#assign-user-select');
+    const statusEl = panel.querySelector('#assign-status');
+
+    function showStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = `status-banner show ${kind}`;
+    }
+    function clearStatus() {
+      statusEl.className = 'status-banner';
+    }
+
+    selectEl.disabled = true;
+    selectEl.innerHTML = '<option>Loading…</option>';
+
+    const users = await loadAssignableUsers();
+    if (ctx.isStale()) return;
+
+    // If the case is currently assigned to someone who isn't in the fetched
+    // (active, regular-staff) list — e.g. a deactivated account — keep them
+    // selectable so this control never silently reassigns the case just by
+    // rendering it.
+    const options = users.slice();
+    if (currentAssignedId && !options.some((u) => u.id === currentAssignedId)) {
+      options.unshift({ id: currentAssignedId, name: initialCase.assignedUserName || 'Currently assigned user' });
+    }
+
+    selectEl.innerHTML = `
+      <option value="">Unassigned</option>
+      ${options.map((u) => `<option value="${ctx.escapeHtml(u.id)}" ${u.id === currentAssignedId ? 'selected' : ''}>${ctx.escapeHtml(u.name)}</option>`).join('')}
+    `;
+    selectEl.disabled = false;
+
+    if (!users.length) {
+      showStatus('Could not load the staff list — you may not have permission to view all users.', 'err');
+    }
+
+    selectEl.addEventListener('change', async () => {
+      const newUserId = selectEl.value;
+      clearStatus();
+      selectEl.disabled = true;
+      const res = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: { assignedUserId: newUserId || null } });
+      if (ctx.isStale()) return;
+      selectEl.disabled = false;
+
+      if (!res.ok) {
+        if (res.status === 403) {
+          showStatus("You don't have permission to reassign this case.", 'err');
+        } else {
+          showStatus(res.message || 'Could not reassign this case. Please try again.', 'err');
+        }
+        selectEl.value = currentAssignedId;
+        return;
+      }
+
+      currentAssignedId = newUserId;
+      const selectedOption = options.find((u) => u.id === newUserId);
+      showStatus(newUserId ? `Reassigned to ${selectedOption ? selectedOption.name : 'selected user'}.` : 'Case unassigned.', 'ok');
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Senior Sign-Off — Check/Challenge/Appeal each need a senior sign-off
+  // before the case can move past that stage (enforced server-side by the
+  // Case entity's Before-Save Formula script). Setting a row to "Requested"
+  // triggers the EspoCRM webhook -> n8n automation that emails the senior
+  // caseworkers; a senior/director then sets it to "Approved" to unblock the
+  // case. Shown here so the status is visible without leaving the app, and
+  // actionable by whoever's role/permissions allow it (EspoCRM ACL decides,
+  // same principle as everywhere else — a 403 here is expected for staff who
+  // shouldn't be able to grant their own sign-off).
+  // ---------------------------------------------------------------------------
+  function signOffPillClass(status) {
+    if (status === 'Approved') return 'good';
+    if (status === 'Requested') return 'warn';
+    return 'neutral';
+  }
+
+  function renderSignOffRow(stage, c) {
+    const value = c[stage.field] || 'Not Requested';
+    return `
+      <div class="signoff-row" data-stage-field="${stage.field}">
+        <label>${esc(stage.label)} sign-off</label>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span class="pill ${signOffPillClass(value)}">${esc(value)}</span>
+          <select class="signoff-select" data-stage-field="${stage.field}">
+            ${SIGNOFF_STATUSES.map((s) => `<option value="${esc(s)}" ${s === value ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    `;
+  }
+
+  async function wireSignOffPanel(panel, initialCase, caseId, ctx) {
+    const statusEl = panel.querySelector('#signoff-status');
+
+    function showStatus(msg, kind) {
+      statusEl.textContent = msg;
+      statusEl.className = `status-banner show ${kind}`;
+    }
+    function clearStatus() {
+      statusEl.className = 'status-banner';
+    }
+
+    panel.querySelectorAll('.signoff-select').forEach((selectEl) => {
+      const field = selectEl.dataset.stageField;
+      const rowEl = panel.querySelector(`.signoff-row[data-stage-field="${field}"]`);
+      const pillEl = rowEl.querySelector('.pill');
+      let previousValue = selectEl.value;
+
+      selectEl.addEventListener('change', async () => {
+        const newValue = selectEl.value;
+        clearStatus();
+        selectEl.disabled = true;
+        const res = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: { [field]: newValue } });
+        if (ctx.isStale()) return;
+        selectEl.disabled = false;
+
+        if (!res.ok) {
+          if (res.status === 403) {
+            showStatus("You don't have permission to change this sign-off status.", 'err');
+          } else {
+            showStatus(res.message || 'Could not update sign-off status. Please try again.', 'err');
+          }
+          selectEl.value = previousValue;
+          return;
+        }
+
+        previousValue = newValue;
+        pillEl.textContent = newValue;
+        pillEl.className = `pill ${signOffPillClass(newValue)}`;
+        showStatus(
+          newValue === 'Requested'
+            ? 'Sign-off requested — the senior caseworkers have been emailed automatically.'
+            : 'Sign-off status updated.',
+          'ok'
+        );
+      });
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -640,6 +882,8 @@
 
     const c = res.data || {};
     const documentsReceived = Array.isArray(c.cDocumentsReceived) ? c.cDocumentsReceived : [];
+    const docOptions = await loadDocumentOptions();
+    if (ctx.isStale()) return;
 
     body.innerHTML = `
       <h1 class="module-title">Case #${ctx.escapeHtml(c.number)}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</h1>
@@ -657,13 +901,18 @@
               <button class="btn btn-secondary btn-sm" id="details-edit-btn">Edit</button>
             </div>
             <div class="status-banner" id="details-status"></div>
+            <div class="field" style="margin-bottom:14px;">
+              <label for="assign-user-select">Assigned to</label>
+              <select id="assign-user-select"><option>Loading…</option></select>
+              <div class="status-banner" id="assign-status"></div>
+            </div>
             <div id="details-body"></div>
           </div>
 
           <div class="panel">
-            <h3 class="panel-heading">Documents received (${documentsReceived.length}/${DOCUMENT_OPTIONS.length})</h3>
+            <h3 class="panel-heading">Documents received (${documentsReceived.length}/${docOptions.received.length})</h3>
             <div class="doc-checklist">
-              ${DOCUMENT_OPTIONS.map((doc) => `
+              ${docOptions.received.map((doc) => `
                 <span class="pill ${documentsReceived.includes(doc) ? 'good' : 'neutral'}">${documentsReceived.includes(doc) ? '&#10003; ' : ''}${ctx.escapeHtml(doc)}</span>
               `).join('')}
             </div>
@@ -691,6 +940,15 @@
               <div><label>Reminder sent</label><div>${c.cPaymentReminderSent ? 'Yes' : 'No'}</div></div>
             </div>
           </div>
+
+          <div class="panel" id="signoff-panel">
+            <h3 class="panel-heading">Senior Sign-Off</h3>
+            <p style="color:var(--muted); font-size:12px; margin-top:-8px;">Required before this case can move past Check, Challenge, or Appeal. Setting a stage to "Requested" automatically emails the senior caseworkers.</p>
+            <div class="status-banner" id="signoff-status"></div>
+            <div class="signoff-list">
+              ${SIGNOFF_STAGES.map((stage) => renderSignOffRow(stage, c)).join('')}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -702,6 +960,10 @@
           <div>
             <label for="doc-upload-category">Document type</label>
             <select id="doc-upload-category"></select>
+          </div>
+          <div id="doc-upload-other-specify-wrap" style="display:none;">
+            <label for="doc-upload-other-specify">Please specify</label>
+            <input type="text" id="doc-upload-other-specify" placeholder="What kind of document is this?">
           </div>
           <div>
             <label for="doc-upload-file">File</label>
@@ -734,12 +996,18 @@
 
     const docPanel = body.querySelector('#doc-panel');
     if (docPanel) {
-      await wireDocumentsPanel(docPanel, caseId, ctx);
+      await wireDocumentsPanel(docPanel, caseId, ctx, docOptions.category);
     }
 
     const detailsPanel = body.querySelector('#details-panel');
     if (detailsPanel) {
       await wireCaseDetailsPanel(detailsPanel, c, caseId, ctx);
+      await wireAssignPanel(detailsPanel, c, caseId, ctx);
+    }
+
+    const signoffPanel = body.querySelector('#signoff-panel');
+    if (signoffPanel) {
+      await wireSignOffPanel(signoffPanel, c, caseId, ctx);
     }
 
     const notesPanel = body.querySelector('#notes-panel');

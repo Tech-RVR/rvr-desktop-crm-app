@@ -1,10 +1,24 @@
 'use strict';
 
 (function () {
-  // Matches DOCUMENT_OPTIONS.length in case-detail.js (the full 13-item
-  // document checklist) — a case counts as "awaiting documents" while it
-  // has fewer than this many entries in cDocumentsReceived.
-  const ALL_DOCS_COUNT = 13;
+  // Fallback only — a case counts as "awaiting documents" while it has fewer
+  // entries in cDocumentsReceived than the full checklist has options. The
+  // real count is fetched live from EspoCRM's own Metadata (same principle
+  // as case-detail.js's loadDocumentOptions) so this can never silently
+  // drift out of sync with the CRM's actual cDocumentsReceived enum.
+  const ALL_DOCS_COUNT_FALLBACK = 14;
+
+  async function loadAllDocsCount() {
+    try {
+      const res = await window.rvr.espo.request('Metadata');
+      const opts = res && res.ok && res.data && res.data.entityDefs
+        && res.data.entityDefs.Case && res.data.entityDefs.Case.fields
+        && res.data.entityDefs.Case.fields.cDocumentsReceived
+        && res.data.entityDefs.Case.fields.cDocumentsReceived.options;
+      if (Array.isArray(opts) && opts.length) return opts.length;
+    } catch (err) { /* fall through to the baked-in count */ }
+    return ALL_DOCS_COUNT_FALLBACK;
+  }
 
   function money(n) {
     const num = Number(n) || 0;
@@ -29,12 +43,15 @@
       // KPI cards below can be computed client-side from one request, the
       // same pattern used elsewhere in this app (e.g. cases.js's single list
       // query) rather than four separate round trips.
-      const res = await window.rvr.espo.request('Case', {
-        query: {
-          select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving,assignedUserId,assignedUserName',
-          maxSize: 200
-        }
-      });
+      const [res, allDocsCount] = await Promise.all([
+        window.rvr.espo.request('Case', {
+          query: {
+            select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving,assignedUserId,assignedUserName',
+            maxSize: 200
+          }
+        }),
+        loadAllDocsCount()
+      ]);
 
       if (!res.ok) {
         container.querySelector('#dash-kpis').innerHTML = `<div class="empty-state">Could not load your cases (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
@@ -57,7 +74,7 @@
 
       const awaitingDocs = cases.filter((c) => {
         const docsReceived = Array.isArray(c.cDocumentsReceived) ? c.cDocumentsReceived.length : 0;
-        return docsReceived < ALL_DOCS_COUNT && !isClosed(c);
+        return docsReceived < allDocsCount && !isClosed(c);
       }).length;
 
       const today = new Date();
