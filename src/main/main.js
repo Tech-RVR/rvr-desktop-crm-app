@@ -60,6 +60,42 @@ function reportError({ errorMessage, stackTrace, userAction }) {
     });
 }
 
+/**
+ * 2026-08-18: prompted by a real gap — David hit a bare EspoCRM 403
+ * (org-wide 2FA setting was off) that showed a friendly inline error in the
+ * app, exactly as designed, and therefore never surfaced anywhere: it wasn't
+ * an uncaught exception or an unhandled rejection, so App Error Tracking
+ * never fired and Tyrone never heard about it until David mentioned it
+ * directly. This closes that specific gap for API-call failures without
+ * changing what staff see on screen at all — every screen still shows its
+ * own friendly inline message exactly as before; this only adds a silent,
+ * additional report to `tech@` for the subset that looks like a genuine bug.
+ *
+ * "Unexpected" here means: NOT a routine 401 (not logged in / session
+ * expired / wrong password / needs a 2FA code — all normal, frequent,
+ * staff-facing outcomes not worth an email), and NOT an error EspoCRM itself
+ * gave a specific, known reason for (a validation message, a real
+ * permission explanation). Everything else — a bare/generic failure with no
+ * reason given, a malformed response, a network-level error — gets reported
+ * in the background, in addition to (never instead of) the on-screen
+ * message. See espoClient.js's `EspoAuthError.expected` for where each
+ * failure path decides which bucket it's in.
+ */
+function reportUnexpectedApiFailure(err, userAction) {
+  const isAuthErr = err instanceof EspoAuthError;
+  const status = isAuthErr ? err.status : undefined;
+  const expected = isAuthErr ? !!err.expected : false;
+
+  if (status === 401) return;
+  if (expected) return;
+
+  reportError({
+    errorMessage: err && err.message ? err.message : String(err),
+    stackTrace: err && err.stack ? err.stack : '(no stack trace)',
+    userAction
+  });
+}
+
 process.on('uncaughtException', (err) => {
   reportError({ errorMessage: err.message, stackTrace: err.stack, userAction: 'Background (main process uncaught exception)' });
 });
@@ -210,6 +246,7 @@ ipcMain.handle('auth:login', async (_event, { userName, password, code }) => {
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
     const secondStepRequired = err instanceof EspoAuthError ? !!err.secondStepRequired : false;
+    reportUnexpectedApiFailure(err, `Signing in as "${userName || '(blank)'}"`);
     return { ok: false, message: err.message, status, secondStepRequired };
   }
 });
@@ -234,6 +271,7 @@ ipcMain.handle('espo:request', async (_event, { path: reqPath, method, query, bo
     return { ok: true, data };
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
+    reportUnexpectedApiFailure(err, `API call: ${method || 'GET'} ${reqPath}`);
     return { ok: false, message: err.message, status };
   }
 });
@@ -252,6 +290,7 @@ ipcMain.handle('espo:downloadFile', async (_event, { fileId, fileName }) => {
     return { ok: true, path: saveResult.filePath };
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
+    reportUnexpectedApiFailure(err, `Downloading file ${fileId}`);
     return { ok: false, message: err.message, status };
   }
 });

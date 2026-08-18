@@ -24,10 +24,22 @@
 const BASE_URL = 'https://crm.rvrratingpartners.co.uk/api/v1';
 
 class EspoAuthError extends Error {
-  constructor(message, status) {
+  /**
+   * `expected` marks a failure as a routine, understood, staff-facing outcome
+   * (wrong password, no permission on a specific record, a validation
+   * message EspoCRM itself supplied, needs-a-2FA-code) as opposed to
+   * something that actually broke (a bare/generic failure with no reason
+   * given, a malformed response, a network error). Added 2026-08-18 so the
+   * main process can decide what's worth reporting to App Error Tracking
+   * without every screen needing its own opinion — see main.js's
+   * `reportUnexpectedApiFailure`. Defaults to false (report it) so a new
+   * failure path added later fails safe toward visibility, not silence.
+   */
+  constructor(message, status, expected = false) {
     super(message);
     this.name = 'EspoAuthError';
     this.status = status;
+    this.expected = expected;
   }
 }
 
@@ -71,7 +83,7 @@ class EspoClient {
    */
   async login(userName, password, code) {
     if (!userName || !password) {
-      throw new EspoAuthError('Username and password are required.', 400);
+      throw new EspoAuthError('Username and password are required.', 400, true);
     }
 
     const authHeader = 'Basic ' + Buffer.from(`${userName}:${password}`).toString('base64');
@@ -90,15 +102,20 @@ class EspoClient {
           code
             ? 'That code was not accepted. Please try the current code from your authenticator app.'
             : 'Enter the 6-digit code from your authenticator app.',
-          res.status
+          res.status,
+          true
         );
         err.secondStepRequired = true;
         throw err;
       }
-      throw new EspoAuthError('Incorrect username or password.', res.status);
+      // A routine, staff-facing outcome (typo'd password, expired account) —
+      // not worth an App Error Tracking email. Contrast with the generic
+      // fallback below, which means EspoCRM refused for some OTHER reason.
+      throw new EspoAuthError('Incorrect username or password.', res.status, true);
     }
     if (!res.ok) {
-      throw new EspoAuthError(`EspoCRM returned an unexpected error (HTTP ${res.status}). Please try again.`, res.status);
+      // No known/expected reason for this one — genuinely unexpected.
+      throw new EspoAuthError(`EspoCRM returned an unexpected error (HTTP ${res.status}). Please try again.`, res.status, false);
     }
 
     // GET App/user does NOT return a bare user record. EspoCRM wraps it:
@@ -115,9 +132,13 @@ class EspoClient {
     const user = (payload && payload.user) || payload || {};
 
     if (!user.id) {
+      // A 200 with no usable user record is a structural surprise, not a
+      // credentials problem — worth reporting even though the HTTP call
+      // itself "succeeded".
       throw new EspoAuthError(
         'Signed in, but EspoCRM did not return a user record. Please contact support.',
-        res.status
+        res.status,
+        false
       );
     }
 
@@ -154,7 +175,7 @@ class EspoClient {
    */
   async request(path, { method = 'GET', query, body } = {}) {
     if (!this._authHeader) {
-      throw new EspoAuthError('Not logged in.', 401);
+      throw new EspoAuthError('Not logged in.', 401, true);
     }
 
     let url = `${BASE_URL}/${path.replace(/^\//, '')}`;
@@ -178,16 +199,26 @@ class EspoClient {
     if (res.status === 401) {
       // Session-equivalent expired / credentials no longer valid.
       this.logout();
-      throw new EspoAuthError('Your session has expired. Please log in again.', 401);
+      throw new EspoAuthError('Your session has expired. Please log in again.', 401, true);
     }
 
     if (!res.ok) {
+      // 2026-08-18: whether EspoCRM gave a real, specific reason is exactly
+      // the signal for whether this was an "expected" outcome (a permission
+      // message, a validation failure) or a genuine unexplained failure (a
+      // bare/empty error body — e.g. EspoCRM's own `throw new Forbidden()`
+      // with no message, as hit by the 2FA-setup 403 that prompted this).
+      // See main.js's `reportUnexpectedApiFailure` for what happens with it.
       let message = `EspoCRM request failed (HTTP ${res.status}).`;
+      let expected = false;
       try {
         const errBody = await res.json();
-        if (errBody && errBody.message) message = errBody.message;
+        if (errBody && errBody.message) {
+          message = errBody.message;
+          expected = true;
+        }
       } catch (_) { /* ignore parse failure, keep generic message */ }
-      throw new EspoAuthError(message, res.status);
+      throw new EspoAuthError(message, res.status, expected);
     }
 
     if (res.status === 204) return null;
@@ -202,7 +233,7 @@ class EspoClient {
    */
   async downloadFile(fileId) {
     if (!this._authHeader) {
-      throw new EspoAuthError('Not logged in.', 401);
+      throw new EspoAuthError('Not logged in.', 401, true);
     }
 
     const res = await fetch(`${BASE_URL}/Attachment/file/${encodeURIComponent(fileId)}`, {
@@ -212,10 +243,12 @@ class EspoClient {
 
     if (res.status === 401) {
       this.logout();
-      throw new EspoAuthError('Your session has expired. Please log in again.', 401);
+      throw new EspoAuthError('Your session has expired. Please log in again.', 401, true);
     }
     if (!res.ok) {
-      throw new EspoAuthError(`Could not download that file (HTTP ${res.status}).`, res.status);
+      // This one never reads the response body, so there's no expected/
+      // unexpected distinction to make — always report it.
+      throw new EspoAuthError(`Could not download that file (HTTP ${res.status}).`, res.status, false);
     }
 
     const arrayBuffer = await res.arrayBuffer();
