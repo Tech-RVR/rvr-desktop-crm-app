@@ -457,7 +457,7 @@
     `;
   }
 
-  async function wireCaseDetailsPanel(panel, initialCase, caseId, ctx) {
+  async function wireCaseDetailsPanel(panel, initialCase, caseId, ctx, onStageChanged) {
     let current = initialCase;
     const bodyEl = panel.querySelector('#details-body');
     const editBtn = panel.querySelector('#details-edit-btn');
@@ -804,6 +804,15 @@
         current = Object.assign({}, current, res.data || body);
         showStatus('Saved.', 'ok');
         paintView();
+        // The page's own header badge and the big stage-track bar above this
+        // panel are rendered once, from the Case record `render()` loaded
+        // when the page first opened -- they don't automatically pick up
+        // changes made in here. Without this, a stage change saves
+        // correctly (confirmed via the Cases list) but LOOKS like nothing
+        // happened, because the only two places a stage is visibly shown
+        // on this page both go stale. Push the update up so what the user
+        // is looking at matches what was actually just saved.
+        if (typeof onStageChanged === 'function') onStageChanged(current);
       });
     }
 
@@ -1331,9 +1340,26 @@
       await wireDocumentsPanel(docPanel, caseId, ctx, docOptions.category);
     }
 
+    // The stage badge in the header and the stage-track bar just above the
+    // two-column layout are both built once, right here, from `c` -- they
+    // have no other way to learn that the Case details panel below changed
+    // the stage. This callback lets that panel push a fresh copy up after a
+    // successful save so both stay in sync with what was actually saved.
+    const stageBadgeEl = body.querySelector('.module-subtitle span');
+    const stageTrackEl = body.querySelector('.stage-track');
+    function refreshStageDisplay(updatedCase) {
+      if (stageBadgeEl) {
+        stageBadgeEl.className = window.rvrStageBadgeClass(updatedCase.cCaseStage);
+        stageBadgeEl.textContent = updatedCase.cCaseStage || 'No stage set';
+      }
+      if (stageTrackEl) {
+        stageTrackEl.innerHTML = renderStageTrack(updatedCase);
+      }
+    }
+
     const detailsPanel = body.querySelector('#details-panel');
     if (detailsPanel) {
-      await wireCaseDetailsPanel(detailsPanel, c, caseId, ctx);
+      await wireCaseDetailsPanel(detailsPanel, c, caseId, ctx, refreshStageDisplay);
       await wireAssignPanel(detailsPanel, c, caseId, ctx);
     }
 
