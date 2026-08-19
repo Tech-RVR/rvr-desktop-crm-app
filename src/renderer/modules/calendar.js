@@ -336,7 +336,14 @@
       const monthStartStr = `${dateStrOf(year, month, 1)} 00:00:00`;
       const nextMonth = month === 11 ? { y: year + 1, m: 0 } : { y: year, m: month + 1 };
       const nextMonthStartStr = `${dateStrOf(nextMonth.y, nextMonth.m, 1)} 00:00:00`;
-      const fetched = await loadMeetingsFrom(monthStartStr, 300);
+      // EspoCRM's API hard-caps maxSize at 200 per request (recordListMaxSizeLimit,
+      // default Espo\Core\Record\SearchParamsFetcher::MAX_SIZE_LIMIT) and returns a
+      // bare 403 for anything over that, regardless of how many records actually
+      // match. 300 always tripped it — every month-grid load 403'd and silently
+      // fell back to an empty list (see loadMeetingsFrom's catch). 200 is the
+      // most a single request can ask for; if a month ever has more meetings than
+      // that, this will need real pagination (offset) rather than a bigger number.
+      const fetched = await loadMeetingsFrom(monthStartStr, 200);
       state.monthMeetings = fetched.filter((m) => m.dateStart < nextMonthStartStr);
     }
 
