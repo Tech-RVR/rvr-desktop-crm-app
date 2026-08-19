@@ -159,7 +159,7 @@
           <div class="doc-actions">
             <span class="pill ${reviewPillClass(d.cReviewStatus)}">${ctx.escapeHtml(d.cReviewStatus || 'Pending Review')}</span>
             <button class="btn btn-secondary btn-doc-download" data-doc-id="${ctx.escapeHtml(d.id)}" data-file-id="${ctx.escapeHtml(d.fileId || '')}" data-file-name="${ctx.escapeHtml(d.name || 'document')}">Download</button>
-            ${pending ? `<button class="btn btn-ok btn-doc-verify" data-doc-id="${ctx.escapeHtml(d.id)}">Verify</button>` : ''}
+            ${pending ? `<button class="btn btn-ok btn-doc-verify" data-doc-id="${ctx.escapeHtml(d.id)}" data-category="${ctx.escapeHtml(d.cCategory || '')}">Verify</button>` : ''}
             ${pending ? `<button class="btn btn-danger btn-doc-reject" data-doc-id="${ctx.escapeHtml(d.id)}">Reject</button>` : ''}
             <button class="btn btn-danger btn-doc-delete" data-doc-id="${ctx.escapeHtml(d.id)}">Delete</button>
           </div>
@@ -168,7 +168,12 @@
     }).join('');
   }
 
-  async function wireDocumentsPanel(panel, caseId, ctx, categoryOptions) {
+  async function wireDocumentsPanel(panel, caseId, ctx, categoryOptions, receivedOptions, documentsReceived, onDocumentsReceivedChanged) {
+    // A running local copy of the Case's own cDocumentsReceived list, kept
+    // in sync with what's actually been saved -- verifying a second document
+    // in the same category should not fire a redundant PUT, and a failed
+    // PUT should not be treated as if it had ticked.
+    let receivedNow = Array.isArray(documentsReceived) ? documentsReceived.slice() : [];
     const listEl = panel.querySelector('#doc-list');
     const uploadBtn = panel.querySelector('#doc-upload-btn');
     const categorySelect = panel.querySelector('#doc-upload-category');
@@ -239,9 +244,32 @@
       listEl.querySelectorAll('.btn-doc-verify').forEach((btn) => {
         btn.addEventListener('click', async () => {
           btn.disabled = true;
+          const category = btn.dataset.category;
           const res = await window.rvr.espo.request(`Document/${btn.dataset.docId}`, { method: 'PUT', body: { cReviewStatus: 'Verified' } });
-          if (res.ok) { showStatus('Document verified.', 'ok'); loadDocuments(); }
-          else { showStatus(res.message || 'Could not verify this document.', 'err'); btn.disabled = false; }
+          if (!res.ok) { showStatus(res.message || 'Could not verify this document.', 'err'); btn.disabled = false; return; }
+
+          showStatus('Document verified.', 'ok');
+          loadDocuments();
+
+          // Verifying a document is the real-world signal that its matching
+          // "Documents Received" checklist item is now actually in hand --
+          // previously nothing on this page reflected that, so the checklist
+          // (which is also what gates moving a case past "Evidence Gathering
+          // / Site Inspection") silently drifted out of sync with what staff
+          // had genuinely verified, unless someone remembered to go tick it
+          // separately. If this document's category matches one of the
+          // case's own Documents Received options and isn't already ticked,
+          // tick it here, in the same action -- no separate manual step.
+          if (category && Array.isArray(receivedOptions) && receivedOptions.includes(category) && !receivedNow.includes(category)) {
+            const nextReceived = receivedNow.concat([category]);
+            const caseRes = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: { cDocumentsReceived: nextReceived } });
+            if (caseRes.ok) {
+              receivedNow = nextReceived;
+              if (typeof onDocumentsReceivedChanged === 'function') onDocumentsReceivedChanged(receivedNow);
+            } else {
+              showStatus('Document verified, but the Documents Received checklist could not be updated automatically -- tick it manually.', 'err');
+            }
+          }
         });
       });
 
@@ -1250,9 +1278,9 @@
             <div id="details-body"></div>
           </div>
 
-          <div class="panel">
-            <h3 class="panel-heading">Documents received (${documentsReceived.length}/${docOptions.received.length})</h3>
-            <div class="doc-checklist">
+          <div class="panel" id="documents-received-panel">
+            <h3 class="panel-heading" id="documents-received-heading">Documents received (${documentsReceived.length}/${docOptions.received.length})</h3>
+            <div class="doc-checklist" id="documents-received-checklist">
               ${docOptions.received.map((doc) => `
                 <span class="pill ${documentsReceived.includes(doc) ? 'good' : 'neutral'}">${documentsReceived.includes(doc) ? '&#10003; ' : ''}${ctx.escapeHtml(doc)}</span>
               `).join('')}
@@ -1335,9 +1363,28 @@
       </p>
     `;
 
+    // The "Documents received" checklist panel above is built once, right
+    // here, from `documentsReceived` -- it has no other way to learn that
+    // verifying a document in the panel below just ticked one of its items.
+    // This callback lets that panel push a fresh copy up so the checklist
+    // (and its own gating effect on stage advancement) reflects reality
+    // immediately, without a page reload.
+    const receivedHeadingEl = body.querySelector('#documents-received-heading');
+    const receivedChecklistEl = body.querySelector('#documents-received-checklist');
+    function refreshDocumentsReceived(updatedReceived) {
+      if (receivedHeadingEl) {
+        receivedHeadingEl.textContent = `Documents received (${updatedReceived.length}/${docOptions.received.length})`;
+      }
+      if (receivedChecklistEl) {
+        receivedChecklistEl.innerHTML = docOptions.received.map((doc) => `
+          <span class="pill ${updatedReceived.includes(doc) ? 'good' : 'neutral'}">${updatedReceived.includes(doc) ? '&#10003; ' : ''}${ctx.escapeHtml(doc)}</span>
+        `).join('');
+      }
+    }
+
     const docPanel = body.querySelector('#doc-panel');
     if (docPanel) {
-      await wireDocumentsPanel(docPanel, caseId, ctx, docOptions.category);
+      await wireDocumentsPanel(docPanel, caseId, ctx, docOptions.category, docOptions.received, documentsReceived, refreshDocumentsReceived);
     }
 
     // The stage badge in the header and the stage-track bar just above the
