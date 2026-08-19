@@ -93,25 +93,36 @@
   }
 
   // Users holding the surveyor role, filtered live via role membership (not
-  // a hardcoded name list) — mirrors the loadAssignableUsers() pattern in
-  // case-detail.js, adapted to filter by role instead of user type. This is
-  // also what already restricts the booking picker to surveyors only.
+  // a hardcoded name list) — this is what restricts the booking picker to
+  // surveyors only.
+  //
+  // EspoCRM unconditionally rejects any `where` filter that targets the
+  // `roles` link (a blanket request-validation restriction, not an ACL
+  // check -- it fires before ACL even runs, and even a fully-privileged API
+  // key gets the same bare 400, `X-Status-Reason: "Forbidden link 'roles'
+  // in where."`). So instead of filtering server-side on `roles`, this
+  // fetches every active regular staff member (the same proven filter
+  // shape as case-detail.js's loadAssignableUsers(): `type: 'regular'` +
+  // `isActive: true`) with `rolesIds` included, then filters to the
+  // Surveyor role client-side. Same visible behaviour, different mechanism.
   async function loadSurveyors() {
     try {
       const res = await window.rvr.espo.request('User', {
         query: {
-          'where[0][type]': 'linkedWith',
-          'where[0][attribute]': 'roles',
-          'where[0][value][]': SURVEYOR_ROLE_ID,
+          'where[0][type]': 'equals',
+          'where[0][attribute]': 'type',
+          'where[0][value]': 'regular',
           'where[1][type]': 'equals',
           'where[1][attribute]': 'isActive',
           'where[1][value]': true,
           orderBy: 'name',
           maxSize: 200,
-          select: 'id,name'
+          select: 'id,name,rolesIds'
         }
       });
-      if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
+      if (res && res.ok && res.data && Array.isArray(res.data.list)) {
+        return res.data.list.filter((u) => Array.isArray(u.rolesIds) && u.rolesIds.includes(SURVEYOR_ROLE_ID));
+      }
     } catch (err) { /* fall through to an empty list */ }
     return [];
   }
