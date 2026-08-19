@@ -36,6 +36,14 @@ contextBridge.exposeInMainWorld('rvr', {
   feedback: {
     submit: (payload) => ipcRenderer.invoke('feedback:submit', payload)
   },
+  security: {
+    // Director/Administrator-role only — see security.js. Goes through a
+    // dedicated n8n webhook, never a direct EspoCRM call, since no staff
+    // login (however senior) has ACL rights to touch another user's
+    // password field directly. Enforced server-side; the app's own gating
+    // is just a convenience so non-admins never see the control.
+    resetColleaguePassword: (targetUserId) => ipcRenderer.invoke('security:resetColleaguePassword', { targetUserId })
+  },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getOsLabel: () => ipcRenderer.invoke('app:getOsLabel'),

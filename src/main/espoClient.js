@@ -59,6 +59,18 @@ class EspoClient {
   }
 
   /**
+   * The current session's raw HTTP Basic Auth header (or null if not logged
+   * in). Exposed ONLY so main.js can forward the logged-in staff member's own
+   * identity to the small set of n8n webhooks that need to verify who's
+   * calling (e.g. the Director/Administrator-gated colleague password reset,
+   * see n8nClient.js) — the renderer never sees this value, same boundary as
+   * everything else in this file.
+   */
+  getAuthHeader() {
+    return this._authHeader;
+  }
+
+  /**
    * Attempt to log in with a real EspoCRM username/password.
    * Confirms the credentials by calling GET /App/user, which EspoCRM only
    * answers successfully for a genuinely authenticated request.
@@ -72,7 +84,7 @@ class EspoClient {
    * "wrong credentials" failure) — that's what lets the login screen tell
    * "needs a code" apart from "wrong password" and prompt accordingly rather
    * than showing a confusing error. The code, once known, is sent as its own
-   * header (`Espo-Authorization-Code`) alongside the same Basic Auth header,
+   * header (`Espo-Authorization-Code`), alongside the same Basic Auth header,
    * verified fresh on every request since this app doesn't keep a session.
    *
    * This only ever affects real human logins: EspoCRM's 2FA enrollment

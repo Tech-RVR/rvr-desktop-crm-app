@@ -16,10 +16,10 @@
 
 const N8N_BASE = 'https://n8n.rvrratingpartners.co.uk/webhook';
 
-async function postJson(path, body) {
+async function postJson(path, body, extraHeaders) {
   const res = await fetch(`${N8N_BASE}/${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
     body: JSON.stringify(body || {})
   });
   const text = await res.text();
@@ -60,7 +60,22 @@ const n8nClient = {
   reportError: (payload) => postJson('rvr-app-error-tracking', payload),
 
   // In-app Feedback button (Bug / Feature Request / Something else).
-  submitFeedback: (payload) => postJson('rvr-app-feedback', payload)
+  submitFeedback: (payload) => postJson('rvr-app-feedback', payload),
+
+  // Reset a colleague's password (Security screen, Director/Administrator
+  // role only — see security.js). The requesting staff member's own EspoCRM
+  // Basic Auth header is forwarded as-is so the webhook can verify their real
+  // identity and role membership itself; this app never touches, sees, or
+  // sets the target's new password directly. The actual write happens
+  // server-side in n8n via a dedicated privileged EspoCRM service account
+  // (the same "proxy owns the data" pattern used for the client portal's
+  // password reset), calling EspoCRM's native generate-and-email action —
+  // never a raw password field this app would have to carry around.
+  resetColleaguePassword: (authHeader, targetUserId) => postJson(
+    'rvr-staff-password-reset',
+    { targetUserId },
+    { Authorization: authHeader }
+  )
 };
 
 module.exports = { n8nClient };

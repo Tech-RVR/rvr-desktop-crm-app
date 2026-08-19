@@ -315,6 +315,15 @@ ipcMain.handle('clock:event', async (_event, payload) => {
   return res;
 });
 
+ipcMain.handle('security:resetColleaguePassword', async (_event, { targetUserId }) => {
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) {
+    return { ok: false, data: { success: false, message: 'You must be signed in to do this.' } };
+  }
+  const res = await n8nClient.resetColleaguePassword(authHeader, targetUserId);
+  return res;
+});
+
 ipcMain.handle('feedback:submit', async (_event, payload) => {
   const res = await n8nClient.submitFeedback({
     ...payload,
