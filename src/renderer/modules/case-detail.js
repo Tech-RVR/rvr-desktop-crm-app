@@ -2,7 +2,7 @@
 
 (function () {
   // A local copy of the same escaping used everywhere else in this app
-  // (app.js's escapeHtml, also handed in as ctx.escapeHtml to render()) â
+  // (app.js's escapeHtml, also handed in as ctx.escapeHtml to render()) —
   // needed here because renderCaseDetailsView/renderCaseDetailsEditForm are
   // pure template helpers that don't receive ctx.
   function esc(str) {
@@ -19,7 +19,7 @@
     'Closed', 'Closed Without Payment - Disputed'
   ];
 
-  // Fallback only â the real options are fetched live from EspoCRM's own
+  // Fallback only — the real options are fetched live from EspoCRM's own
   // Metadata at render time (see loadDocumentOptions), same principle as
   // loadReliefTypes below, so this list can never silently drift out of
   // sync with the CRM's actual cDocumentsReceived / Document.cCategory
@@ -88,12 +88,12 @@
     return RELIEF_TYPES_FALLBACK;
   }
 
-  // The staff who can be assigned/reassigned a case â real caseworkers only
+  // The staff who can be assigned/reassigned a case — real caseworkers only
   // (EspoCRM User.type "regular"), not the admin/API/portal accounts that
   // also live in the Users table. Used to populate the "Assigned to"
   // dropdown on every case, per Tyrone's request that David be able to
   // reassign any case (unassigned or already assigned) to anyone else.
-  // Falls back to an empty list on failure â the dropdown then degrades to
+  // Falls back to an empty list on failure — the dropdown then degrades to
   // just showing whoever the case is already assigned to (see
   // wireAssignPanel), same "don't duplicate EspoCRM's own ACL" principle
   // used everywhere else in this app: if this staff member's role can't see
@@ -118,7 +118,7 @@
     return [];
   }
 
-  // Every document on a case â client-uploaded and staff-uploaded â shown in
+  // Every document on a case — client-uploaded and staff-uploaded — shown in
   // one place, per Tyrone's request: "if they need to pull up someones file
   // they can accsess all the documents from the app that are for that file."
   // No new backend needed here: EspoCRM's own Document ACL (mirrored to each
@@ -199,7 +199,7 @@
     }
 
     async function loadDocuments() {
-      listEl.innerHTML = '<div class="loading-state">Loading documentsâ¦</div>';
+      listEl.innerHTML = '<div class="loading-state">Loading documents…</div>';
       const res = await window.rvr.espo.request('Document', {
         query: {
           'where[0][type]': 'equals',
@@ -260,7 +260,7 @@
           btn.disabled = true;
           const res = await window.rvr.espo.request(`Document/${btn.dataset.docId}`, { method: 'DELETE' });
           if (res.ok) { showStatus('Document deleted.', 'ok'); loadDocuments(); }
-          else { showStatus(res.message || 'Could not delete this document â you may not have permission.', 'err'); btn.disabled = false; }
+          else { showStatus(res.message || 'Could not delete this document — you may not have permission.', 'err'); btn.disabled = false; }
         });
       });
     }
@@ -288,7 +288,7 @@
         return;
       }
       uploadBtn.disabled = true;
-      uploadBtn.textContent = 'Uploadingâ¦';
+      uploadBtn.textContent = 'Uploading…';
       try {
         const fileBase64 = await fileToBase64(file);
         const mimeType = file.type || 'application/octet-stream';
@@ -331,13 +331,13 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Case details â view/edit toggle.
+  // Case details — view/edit toggle.
   //
   // Permission is NOT decided here, same principle as case-new.js: the Save
   // button just PATCHes /Case/{id} as the logged-in user, and a 403 comes back
   // with a plain-English message rather than the app trying to duplicate
   // EspoCRM's own role/team ACL logic (own vs team edit rights differ by
-  // role â Caseworker is "own" only, Surveyor/Admin are "team" â see
+  // role — Caseworker is "own" only, Surveyor/Admin are "team" — see
   // infrastructure-status.md's role-scope table). The Edit button is always
   // shown; EspoCRM's own ACL is the single source of truth for whether a
   // save actually succeeds.
@@ -345,10 +345,10 @@
   function renderCaseDetailsView(c) {
     return `
       <div class="detail-grid">
-        <div><label>Contact</label><div>${esc(c.contactName || 'â')}</div></div>
-        <div><label>Company</label><div>${esc(c.accountName || 'â')}</div></div>
+        <div><label>Contact</label><div>${esc(c.contactName || '—')}</div></div>
+        <div><label>Company</label><div>${esc(c.accountName || '—')}</div></div>
         <div><label>Property address</label><div>${esc(formatAddress(c))}</div></div>
-        <div><label>Relief type</label><div>${esc(c.cReliefType || 'â')}</div></div>
+        <div><label>Relief type</label><div>${esc(c.cReliefType || '—')}</div></div>
         <div><label>Rateable value (before)</label><div>${formatCurrency(c.cRateableValueBefore)}</div></div>
         <div><label>Rateable value (after)</label><div>${formatCurrency(c.cRateableValueAfter)}</div></div>
         <div><label>Annual saving</label><div style="color:var(--ok); font-weight:600;">${formatCurrency(c.cAnnualSaving)}</div></div>
@@ -374,12 +374,12 @@
       <div class="form-grid">
         <div class="field">
           <label for="edit-contact-search">Find existing contact</label>
-          <input type="text" id="edit-contact-search" placeholder="Type a name, email or phone numberâ¦" autocomplete="off">
+          <input type="text" id="edit-contact-search" placeholder="Type a name, email or phone number…" autocomplete="off">
         </div>
         <div class="field">
           <label for="edit-contact-select">Contact</label>
-          <select id="edit-contact-select"><option value="">Loading contactsâ¦</option></select>
-          <span class="field-hint">Pick an existing contact, or leave as ââ No contact linked ââ and fill in the fields below to add a new one.</span>
+          <select id="edit-contact-select"><option value="">Loading contacts…</option></select>
+          <span class="field-hint">Pick an existing contact, or leave as “— No contact linked —” and fill in the fields below to add a new one.</span>
         </div>
         <div class="field">
           <label for="edit-contact-name">Contact name</label>
@@ -480,7 +480,7 @@
     async function paintEdit() {
       editBtn.style.display = 'none';
       clearStatus();
-      bodyEl.innerHTML = '<div class="loading-state">Loadingâ¦</div>';
+      bodyEl.innerHTML = '<div class="loading-state">Loading…</div>';
       const reliefOptions = await loadReliefTypes();
       if (ctx.isStale()) return;
 
@@ -557,7 +557,7 @@
 
       function contactLabel(rec) {
         const name = `${rec.firstName || ''} ${rec.lastName || ''}`.trim() || rec.name || '(no name)';
-        return rec.emailAddress ? `${name} â ${rec.emailAddress}` : name;
+        return rec.emailAddress ? `${name} — ${rec.emailAddress}` : name;
       }
 
       async function searchContactsForEdit(term) {
@@ -594,7 +594,7 @@
           options.unshift(contactsById[preselectId]);
         }
         contactSelectEl.innerHTML =
-          '<option value="">â No contact linked â</option>' +
+          '<option value="">— No contact linked —</option>' +
           options.map((rec) => `<option value="${esc(rec.id)}" ${rec.id === preselectId ? 'selected' : ''}>${esc(contactLabel(rec))}</option>`).join('');
       }
 
@@ -625,7 +625,7 @@
         contactSearchTimer = setTimeout(async () => {
           const mySeq = ++contactSearchSeq;
           const prevValue = contactSelectEl.value;
-          contactSelectEl.innerHTML = '<option value="">Searchingâ¦</option>';
+          contactSelectEl.innerHTML = '<option value="">Searching…</option>';
           const result = await searchContactsForEdit(contactSearchInput.value.trim());
           if (mySeq !== contactSearchSeq || ctx.isStale()) return;
           fillContactSelect(result, prevValue);
@@ -674,8 +674,8 @@
         if (stageVal === 'Closed Without Payment - Disputed') body.cDisputeReason = disputeReasonsChecked;
 
         saveBtn.disabled = true;
-        saveBtn.textContent = 'Savingâ¦';
-        showStatus('Savingâ¦', 'info');
+        saveBtn.textContent = 'Saving…';
+        showStatus('Saving…', 'info');
 
         // Resolve the Contact/Company panel before touching the Case itself.
         // Mirrors case-new.js's create-or-find logic, plus two extra branches
@@ -812,7 +812,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Assigned to â a standalone dropdown (not gated behind the Case details
+  // Assigned to — a standalone dropdown (not gated behind the Case details
   // Edit toggle above) so David/any staff member can reassign a case to
   // anyone else in one click, whether it's currently unassigned or already
   // held by a colleague. PATCHes assignedUserId directly on the Case, same
@@ -833,13 +833,13 @@
     }
 
     selectEl.disabled = true;
-    selectEl.innerHTML = '<option>Loadingâ¦</option>';
+    selectEl.innerHTML = '<option>Loading…</option>';
 
     const users = await loadAssignableUsers();
     if (ctx.isStale()) return;
 
     // If the case is currently assigned to someone who isn't in the fetched
-    // (active, regular-staff) list â e.g. a deactivated account â keep them
+    // (active, regular-staff) list — e.g. a deactivated account — keep them
     // selectable so this control never silently reassigns the case just by
     // rendering it.
     const options = users.slice();
@@ -854,7 +854,7 @@
     selectEl.disabled = false;
 
     if (!users.length) {
-      showStatus('Could not load the staff list â you may not have permission to view all users.', 'err');
+      showStatus('Could not load the staff list — you may not have permission to view all users.', 'err');
     }
 
     selectEl.addEventListener('change', async () => {
@@ -882,14 +882,14 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Senior Sign-Off â Check/Challenge/Appeal each need a senior sign-off
+  // Senior Sign-Off — Check/Challenge/Appeal each need a senior sign-off
   // before the case can move past that stage (enforced server-side by the
   // Case entity's Before-Save Formula script). Setting a row to "Requested"
   // triggers the EspoCRM webhook -> n8n automation that emails the senior
   // caseworkers; a senior/director then sets it to "Approved" to unblock the
   // case. Shown here so the status is visible without leaving the app, and
   // actionable by whoever's role/permissions allow it (EspoCRM ACL decides,
-  // same principle as everywhere else â a 403 here is expected for staff who
+  // same principle as everywhere else — a 403 here is expected for staff who
   // shouldn't be able to grant their own sign-off).
   // ---------------------------------------------------------------------------
   function signOffPillClass(status) {
@@ -953,9 +953,9 @@
         pillEl.className = `pill ${signOffPillClass(newValue)}`;
         let message = 'Sign-off status updated.';
         if (newValue === 'Requested') {
-          message = 'Sign-off requested â the senior caseworkers have been emailed automatically.';
+          message = 'Sign-off requested — the senior caseworkers have been emailed automatically.';
         } else if (newValue === 'Approved') {
-          message = 'Sign-off approved â the caseworker has been emailed automatically.';
+          message = 'Sign-off approved — the caseworker has been emailed automatically.';
         }
         showStatus(message, 'ok');
       });
@@ -963,7 +963,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Notes â a thin UI over EspoCRM's own Stream/Note API (POST /Note with
+  // Notes — a thin UI over EspoCRM's own Stream/Note API (POST /Note with
   // type:'Post', parentType/parentId pointing at this Case), so notes show up
   // in EspoCRM's own activity stream too rather than living in a second,
   // bespoke store nobody else can see. Marked isInternal so they never
@@ -993,7 +993,7 @@
     }
 
     async function loadNotes() {
-      listEl.innerHTML = '<div class="loading-state">Loading notesâ¦</div>';
+      listEl.innerHTML = '<div class="loading-state">Loading notes…</div>';
       const res = await window.rvr.espo.request(`Case/${caseId}/stream`, {
         query: { maxSize: 100, orderBy: 'createdAt', order: 'desc' }
       });
@@ -1004,7 +1004,7 @@
       }
       const all = (res.data && res.data.list) || [];
       // The stream mixes system entries (stage changes, field updates) in
-      // with genuine human notes â only "Post" type entries are notes
+      // with genuine human notes — only "Post" type entries are notes
       // someone actually wrote, which is what this panel is for.
       const notes = all.filter((n) => n.type === 'Post');
       listEl.innerHTML = renderNotesList(notes, ctx);
@@ -1014,7 +1014,7 @@
       const text = textEl.value.trim();
       if (!text) { showStatus('Write something before adding a note.', 'err'); return; }
       addBtn.disabled = true;
-      addBtn.textContent = 'Addingâ¦';
+      addBtn.textContent = 'Adding…';
       const res = await window.rvr.espo.request('Note', {
         method: 'POST',
         body: { type: 'Post', parentType: 'Case', parentId: caseId, post: text, isInternal: true }
@@ -1035,13 +1035,13 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Client messages â reads/writes CPortalMessage directly with the logged-in
+  // Client messages — reads/writes CPortalMessage directly with the logged-in
   // staff member's own EspoCRM session (no proxy needed; the proxy pattern
   // elsewhere in this project exists specifically because *portal clients*
-  // can't be trusted with a privileged credential â staff already have their
+  // can't be trusted with a privileged credential — staff already have their
   // own real, role-scoped EspoCRM login for everything else in this app).
   // Requires the CPortalMessage staff-role ACL grant (read/create, team-
-  // scoped) â see infrastructure-status.md; until that lands, this panel
+  // scoped) — see infrastructure-status.md; until that lands, this panel
   // degrades to a plain "can't load messages" state rather than erroring,
   // same 403-handling convention as the rest of the app.
   // ---------------------------------------------------------------------------
@@ -1077,7 +1077,7 @@
     let latestClientMessageAt = null;
 
     async function loadMessages() {
-      threadEl.innerHTML = '<div class="loading-state">Loading messagesâ¦</div>';
+      threadEl.innerHTML = '<div class="loading-state">Loading messages…</div>';
       const res = await window.rvr.espo.request('CPortalMessage', {
         query: {
           'where[0][type]': 'equals',
@@ -1102,7 +1102,7 @@
       threadEl.scrollTop = threadEl.scrollHeight;
 
       // Mark this case's newest client message as "seen" so the Messages
-      // nav badge and dashboard stop counting it â local-only bookkeeping,
+      // nav badge and dashboard stop counting it — local-only bookkeeping,
       // see main.js's Store defaults comment.
       const clientMessages = messages.filter((m) => m.direction === 'From Client');
       if (clientMessages.length) {
@@ -1116,7 +1116,7 @@
       const text = textEl.value.trim();
       if (!text) { showStatus('Write a reply before sending.', 'err'); return; }
       sendBtn.disabled = true;
-      sendBtn.textContent = 'Sendingâ¦';
+      sendBtn.textContent = 'Sending…';
       const senderName = (ctx.user && (`${ctx.user.firstName || ''} ${ctx.user.lastName || ''}`.trim() || ctx.user.userName)) || 'Staff';
 
       const res = await window.rvr.espo.request('CPortalMessage', {
@@ -1152,7 +1152,7 @@
   }
 
   function formatCurrency(value) {
-    if (value === null || value === undefined || value === '') return 'â';
+    if (value === null || value === undefined || value === '') return '—';
     const num = Number(value);
     if (Number.isNaN(num)) return String(value);
     return num.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
@@ -1160,17 +1160,17 @@
 
   function formatAddress(c) {
     return [c.cPropertyAddressStreet, c.cPropertyAddressCity, c.cPropertyAddressState, c.cPropertyAddressPostalCode]
-      .filter(Boolean).join(', ') || 'â';
+      .filter(Boolean).join(', ') || '—';
   }
 
   function formatDate(value) {
-    if (!value) return 'â';
+    if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   }
 
-  // Full pipeline stage-track â every stage as a pill, grey if upcoming,
+  // Full pipeline stage-track — every stage as a pill, grey if upcoming,
   // green if passed, gold if current. The disputed terminal state is shown
   // as a single standalone red pill instead of the track, matching the
   // mockup's rvr_crm_mockup.html #detStageTrack behaviour exactly.
@@ -1199,7 +1199,7 @@
 
     container.innerHTML = `
       <a class="back-link" id="case-detail-back">&larr; Back</a>
-      <div id="case-detail-body"><div class="loading-state">Loading caseâ¦</div></div>
+      <div id="case-detail-body"><div class="loading-state">Loading case…</div></div>
     `;
     container.querySelector('#case-detail-back').addEventListener('click', () => ctx.goBack());
 
@@ -1218,7 +1218,7 @@
     if (ctx.isStale()) return;
 
     body.innerHTML = `
-      <h1 class="module-title">Case #${ctx.escapeHtml(c.number)}${c.name ? ` â ${ctx.escapeHtml(c.name)}` : ''}</h1>
+      <h1 class="module-title">Case #${ctx.escapeHtml(c.number)}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</h1>
       <p class="module-subtitle">
         ${ctx.escapeHtml(formatAddress(c))}
         <span class="${window.rvrStageBadgeClass(c.cCaseStage)}" style="margin-left:8px;">${ctx.escapeHtml(c.cCaseStage || 'No stage set')}</span>
@@ -1235,7 +1235,7 @@
             <div class="status-banner" id="details-status"></div>
             <div class="field" style="margin-bottom:14px;">
               <label for="assign-user-select">Assigned to</label>
-              <select id="assign-user-select"><option>Loadingâ¦</option></select>
+              <select id="assign-user-select"><option>Loading…</option></select>
               <div class="status-banner" id="assign-status"></div>
             </div>
             <div id="details-body"></div>
@@ -1255,10 +1255,10 @@
             <p style="color:var(--muted); font-size:12px; margin-top:-8px;">Internal staff notes on this case &mdash; not visible to the client.</p>
             <div class="status-banner" id="notes-status"></div>
             <div class="note-add-row">
-              <textarea id="notes-new-text" rows="2" placeholder="Add a note about this caseâ¦"></textarea>
+              <textarea id="notes-new-text" rows="2" placeholder="Add a note about this case…"></textarea>
               <button class="btn btn-primary" id="notes-add-btn">Add note</button>
             </div>
-            <div id="notes-list"><div class="loading-state">Loading notesâ¦</div></div>
+            <div id="notes-list"><div class="loading-state">Loading notes…</div></div>
           </div>
         </div>
 
@@ -1303,7 +1303,7 @@
           </div>
           <button class="btn btn-primary" id="doc-upload-btn">Upload</button>
         </div>
-        <div id="doc-list"><div class="loading-state">Loading documentsâ¦</div></div>
+        <div id="doc-list"><div class="loading-state">Loading documents…</div></div>
       </div>
 
       <div class="panel" id="messages-panel">
@@ -1313,9 +1313,9 @@
           replying is limited to whoever can edit it, same as everywhere else in this app.
         </p>
         <div class="status-banner" id="messages-status"></div>
-        <div id="messages-thread"><div class="loading-state">Loading messagesâ¦</div></div>
+        <div id="messages-thread"><div class="loading-state">Loading messages…</div></div>
         <div class="message-reply-row">
-          <textarea id="messages-reply-text" rows="2" placeholder="Reply to the clientâ¦"></textarea>
+          <textarea id="messages-reply-text" rows="2" placeholder="Reply to the client…"></textarea>
           <button class="btn btn-primary" id="messages-reply-btn">Send</button>
         </div>
       </div>

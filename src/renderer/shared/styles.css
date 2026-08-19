@@ -381,3 +381,66 @@ td.message-preview{ color:var(--muted); font-weight:400; }
 .rvr-tour-footer{ display: flex; flex-direction: column; gap: 10px; }
 .rvr-tour-dontshow{ font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .rvr-tour-actions{ display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---- Calendar (modules/calendar.js) — iPhone-style month grid + a
+   pop-out day/booking sheet reusing the existing .modal-backdrop/.modal
+   pattern (Feedback/Clock In-Out modals), so it matches the rest of the
+   app's look rather than introducing a second modal style. ---- */
+.cal-toolbar{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.cal-toolbar h2{ font-size:15px; margin:0; color:var(--navy); font-weight:600; }
+.cal-nav-btn{ width:32px; height:32px; padding:0; display:flex; align-items:center; justify-content:center; font-size:15px; }
+.cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+.cal-weekdays{ margin-bottom:4px; }
+.cal-weekday{ font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); text-align:center; padding:2px 0; }
+.cal-day{
+  min-height:64px; border:1px solid var(--line); border-radius:8px; padding:6px;
+  cursor:pointer; background:#fff; display:flex; flex-direction:column; gap:5px;
+}
+.cal-day:hover{ border-color:var(--accent); box-shadow:0 1px 4px rgba(0,0,0,.08); }
+.cal-day.other-month{ background:var(--bg); color:var(--muted); }
+.cal-day.today .cal-day-num{
+  display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px;
+  border-radius:50%; background:var(--navy); color:#fff;
+}
+.cal-day.selected{ border-color:var(--accent); box-shadow:0 0 0 2px rgba(201,162,75,0.35); }
+.cal-day-num{ font-size:12.5px; font-weight:600; }
+.cal-day-dots{ display:flex; flex-wrap:wrap; align-items:center; gap:3px; }
+.cal-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.cal-day-more{ font-size:10px; color:var(--muted); }
+.cal-legend{ display:flex; flex-wrap:wrap; gap:12px; margin-top:14px; font-size:11.5px; color:var(--muted); }
+.cal-legend-item{ display:flex; align-items:center; gap:6px; }
+.cal-legend-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+
+/* Pop-out day sheet: widen the generic .modal a little for the events list
+   + booking form it holds, and let it scroll on short screens instead of
+   overflowing. */
+.cal-day-modal .modal{ width:480px; max-width:92vw; max-height:86vh; overflow-y:auto; }
+.cal-event-row{ display:flex; align-items:center; gap:10px; padding:10px 0; border-bottom:1px solid var(--line); }
+.cal-event-row:last-child{ border-bottom:none; }
+.cal-event-time{ font-size:12.5px; font-weight:700; color:var(--navy); width:98px; flex-shrink:0; }
+.cal-event-main{ flex:1; min-width:0; }
+.cal-event-place{ font-size:13px; }
+.cal-event-meta{ font-size:11px; color:var(--muted); }
+
+/* Colour-coded surveyor initials — used in the day sheet's event rows, the
+   Upcoming Appointments table, and the surveyor picker below. */
+.chip-avatar{
+  width:26px; height:26px; border-radius:50%; color:#fff; font-weight:700; font-size:10.5px;
+  display:flex; align-items:center; justify-content:center; flex-shrink:0;
+}
+.chip-avatar-sm{ width:20px; height:20px; font-size:9.5px; margin-right:6px; vertical-align:-5px; }
+
+/* Surveyor picker for booking — one chip per surveyor, colour-matched to
+   their calendar dots/avatar. A chip goes .busy (dimmed, unclickable) when
+   that surveyor already has an overlapping booking for the selected time
+   slot, which is what makes double-booking actually impossible rather than
+   just unlikely — see calendar.js's conflictFor(). */
+.surveyor-chip-row{ display:flex; flex-wrap:wrap; gap:8px; margin:6px 0 4px; }
+.surveyor-chip{
+  display:inline-flex; align-items:center; gap:7px; padding:5px 12px 5px 5px; border-radius:20px;
+  border:1px solid var(--line); background:#fff; cursor:pointer; font-size:12.5px; font-family:var(--sans); color:var(--text);
+}
+.surveyor-chip:hover{ border-color:var(--accent); }
+.surveyor-chip.selected{ border-color:var(--navy); background:var(--bg); font-weight:600; }
+.surveyor-chip.busy{ opacity:0.45; cursor:not-allowed; }
+.surveyor-chip.busy:hover{ border-color:var(--line); }

@@ -42,6 +42,27 @@
     `;
   }
 
+  // Same textFilter search operator already proven working elsewhere in this
+  // app against Contact (case-new.js/case-detail.js's contact picker) — on
+  // EspoCRM this is a generic full-text match, wired by default to the
+  // entity's own configured search fields (for Case: number, name, and
+  // related contact/company name). Worth a quick live spot-check the first
+  // time it's used for real, since this is the first time it's applied to
+  // the Case entity specifically in this codebase.
+  async function fetchCases(term) {
+    const query = {
+      select: 'number,name,cCaseStage,contactName,cPropertyAddressStreet,cPropertyAddressCity,cReliefType,cRateableValueBefore,cRateableValueAfter,cAnnualSaving,createdAt,assignedUserId,assignedUserName',
+      maxSize: 50,
+      orderBy: 'createdAt',
+      order: 'desc'
+    };
+    if (term) {
+      query['where[0][type]'] = 'textFilter';
+      query['where[0][value]'] = term;
+    }
+    return window.rvr.espo.request('Case', { query });
+  }
+
   async function render(container, ctx) {
     container.innerHTML = `
       <div class="module-header">
@@ -50,6 +71,12 @@
           <p class="module-subtitle">Cases visible to your account, per your EspoCRM role and access.</p>
         </div>
         <button class="btn btn-primary" id="cases-new">+ New case</button>
+      </div>
+      <div class="panel">
+        <div class="field" style="max-width:360px;">
+          <label for="cases-search">Search</label>
+          <input type="text" id="cases-search" placeholder="Search by case number, client or address…" autocomplete="off">
+        </div>
       </div>
       <div class="panel">
         <h3 class="panel-heading" id="cases-mine-heading">My Cases</h3>
@@ -64,49 +91,75 @@
 
     container.querySelector('#cases-new').addEventListener('click', () => ctx.navigateTo('case-new'));
 
-    const res = await window.rvr.espo.request('Case', {
-      query: {
-        select: 'number,name,cCaseStage,contactName,cPropertyAddressStreet,cPropertyAddressCity,cReliefType,cRateableValueBefore,cRateableValueAfter,cAnnualSaving,createdAt,assignedUserId,assignedUserName',
-        maxSize: 50,
-        orderBy: 'createdAt',
-        order: 'desc'
-      }
-    });
-
     const mineListEl = container.querySelector('#cases-mine-list');
     const teamListEl = container.querySelector('#cases-team-list');
+    const searchEl = container.querySelector('#cases-search');
     // Belt-and-braces: the router now hands each render its own container, so
     // this should never be null. Bailing out quietly beats throwing if it ever is.
     if (!mineListEl || !teamListEl) return;
 
-    if (!res.ok) {
-      const msg = `<div class="empty-state">Could not load cases (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
-      mineListEl.innerHTML = msg;
+    let searchToken = 0;
+
+    function wireRowClicks() {
+      container.querySelectorAll('tr.clickable-row').forEach((row) => {
+        row.addEventListener('click', () => ctx.openCase(row.dataset.caseId));
+      });
+    }
+
+    async function runSearch(term) {
+      const token = ++searchToken;
+      mineListEl.innerHTML = '<div class="loading-state">Loading…</div>';
       teamListEl.innerHTML = '';
-      return;
+
+      const res = await fetchCases(term.trim());
+      if (ctx.isStale() || token !== searchToken) return;
+
+      if (!res.ok) {
+        const msg = `<div class="empty-state">Could not load cases (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
+        mineListEl.innerHTML = msg;
+        teamListEl.innerHTML = '';
+        return;
+      }
+
+      const cases = (res.data && res.data.list) || [];
+      const myId = ctx.user && ctx.user.id;
+      const mine = cases.filter((c) => c.assignedUserId === myId);
+      const team = cases.filter((c) => c.assignedUserId !== myId);
+      const searching = !!term.trim();
+
+      container.querySelector('#cases-mine-heading').textContent = `My Cases (${mine.length})`;
+      container.querySelector('#cases-team-heading').textContent = `Team Cases (${team.length})`;
+
+      mineListEl.innerHTML = renderTable(mine, ctx, {
+        emptyText: searching ? 'No matching cases assigned to you.' : 'No cases assigned to you yet.'
+      });
+      teamListEl.innerHTML = renderTable(team, ctx, {
+        notMine: true,
+        emptyText: searching ? 'No other matching team cases.' : 'No other team cases visible right now.'
+      });
+
+      const oldNote = container.querySelector('#cases-list-note');
+      if (oldNote) oldNote.remove();
+      if (cases.length > 0) {
+        const note = document.createElement('p');
+        note.id = 'cases-list-note';
+        note.style.cssText = 'color:var(--muted); font-size:12px; margin-top:4px;';
+        note.textContent = searching
+          ? `Showing up to 50 matching cases, split by who they're assigned to. Click a row to open it.`
+          : 'Showing the 50 most recent cases visible to you, split by who they’re assigned to. Click a row to open it.';
+        teamListEl.after(note);
+      }
+
+      wireRowClicks();
     }
 
-    const cases = (res.data && res.data.list) || [];
-    const myId = ctx.user && ctx.user.id;
-    const mine = cases.filter((c) => c.assignedUserId === myId);
-    const team = cases.filter((c) => c.assignedUserId !== myId);
-
-    container.querySelector('#cases-mine-heading').textContent = `My Cases (${mine.length})`;
-    container.querySelector('#cases-team-heading').textContent = `Team Cases (${team.length})`;
-
-    mineListEl.innerHTML = renderTable(mine, ctx, { emptyText: 'No cases assigned to you yet.' });
-    teamListEl.innerHTML = renderTable(team, ctx, { notMine: true, emptyText: "No other team cases visible right now." });
-
-    if (cases.length > 0) {
-      const note = document.createElement('p');
-      note.style.cssText = 'color:var(--muted); font-size:12px; margin-top:4px;';
-      note.textContent = 'Showing the 50 most recent cases visible to you, split by who they’re assigned to. Click a row to open it.';
-      teamListEl.after(note);
-    }
-
-    container.querySelectorAll('tr.clickable-row').forEach((row) => {
-      row.addEventListener('click', () => ctx.openCase(row.dataset.caseId));
+    let debounceTimer = null;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => runSearch(searchEl.value), 300);
     });
+
+    await runSearch('');
   }
 
   window.rvrModules.cases = { render };
