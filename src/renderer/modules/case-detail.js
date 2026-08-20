@@ -105,9 +105,14 @@
           'where[0][type]': 'equals',
           'where[0][attribute]': 'type',
           'where[0][value]': 'regular',
-          'where[1][type]': 'equals',
+          // 'isTrue', NOT equals+true. `query` is serialised with
+          // URLSearchParams, so a JS boolean becomes the STRING "true", and
+          // EspoCRM's `equals` comparison against a real bool column then
+          // matches nothing at all — a silent, total wipe of the result set
+          // rather than an error. Proven live 2026-08-20 with a throwaway
+          // account: equals+true -> total 0, isTrue -> total 7.
+          'where[1][type]': 'isTrue',
           'where[1][attribute]': 'isActive',
-          'where[1][value]': true,
           orderBy: 'name',
           maxSize: 200,
           select: 'id,name'

@@ -78,9 +78,11 @@
         'where[0][type]': 'in',
         'where[0][attribute]': 'type',
         'where[0][value][]': ['regular', 'admin'],
-        'where[1][type]': 'equals',
+        // See the note in calendar.js: equals+true serialises the boolean to
+        // the string "true" and silently matches zero rows. 'isTrue' takes no
+        // value and is the correct operator for a bool column.
+        'where[1][type]': 'isTrue',
         'where[1][attribute]': 'isActive',
-        'where[1][value]': true,
         orderBy: 'name',
         maxSize: 200,
         select: 'id,name,userName,emailAddress'
