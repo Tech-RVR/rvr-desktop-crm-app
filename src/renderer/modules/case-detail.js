@@ -1036,7 +1036,11 @@
       });
       if (ctx.isStale()) return;
       if (!res.ok) {
-        listEl.innerHTML = `<div class="empty-state">Could not load notes (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
+        if (res.status === 403) {
+          listEl.innerHTML = '<div class="empty-state">Notes on this case aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
+        } else {
+          listEl.innerHTML = `<div class="empty-state">Could not load notes (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
+        }
         return;
       }
       const all = (res.data && res.data.list) || [];
@@ -1060,7 +1064,11 @@
       addBtn.disabled = false;
       addBtn.textContent = 'Add note';
       if (!res.ok) {
-        showStatus(res.message || 'Could not add the note. Please try again.', 'err');
+        if (res.status === 403) {
+          showStatus('Your note was NOT added — notes on this case aren\'t working right now. We\'ve received a report of this and are working on a fix; please try again later.', 'err');
+        } else {
+          showStatus(res.message || 'Could not add the note. Please try again.', 'err');
+        }
         return;
       }
       textEl.value = '';
@@ -1128,7 +1136,7 @@
       if (ctx.isStale()) return;
       if (!res.ok) {
         if (res.status === 403) {
-          threadEl.innerHTML = '<div class="empty-state">Your role does not yet have access to case messages. Ask an administrator to enable it.</div>';
+          threadEl.innerHTML = '<div class="empty-state">Case messages aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
         } else {
           threadEl.innerHTML = `<div class="empty-state">Could not load messages (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
         }
@@ -1173,7 +1181,7 @@
 
       if (!res.ok) {
         if (res.status === 403) {
-          showStatus("You don't have permission to reply on this case. It may not be assigned to you.", 'err');
+          showStatus('Your reply was NOT sent — case messages aren\'t working right now. We\'ve received a report of this and are working on a fix; please try again later.', 'err');
         } else {
           showStatus(res.message || 'Could not send the reply. Please try again.', 'err');
         }

@@ -55,7 +55,7 @@
 
     if (!res.ok) {
       if (res.status === 403) {
-        listEl.innerHTML = '<div class="empty-state">Your role does not yet have access to case messages. Ask an administrator to enable it.</div>';
+        listEl.innerHTML = '<div class="empty-state">Case messages aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
       } else {
         listEl.innerHTML = `<div class="empty-state">Could not load messages (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
       }
