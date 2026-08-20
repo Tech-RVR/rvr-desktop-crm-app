@@ -123,8 +123,12 @@
       if (res && res.ok && res.data && Array.isArray(res.data.list)) {
         return res.data.list.filter((u) => Array.isArray(u.rolesIds) && u.rolesIds.includes(SURVEYOR_ROLE_ID));
       }
-    } catch (err) { /* fall through to an empty list */ }
-    return [];
+    } catch (err) { /* fall through to the null "could not load" result below */ }
+    // null, not [] — an empty surveyor list and a failed surveyor lookup look
+    // identical to the booking form otherwise, and "No surveyors found" is a
+    // misleading thing to tell someone whose request actually 403'd. Same
+    // reasoning as loadMeetingsFrom below.
+    return null;
   }
 
   // Fetches every Meeting from startStr onward, ordered ascending, up to
@@ -148,8 +152,13 @@
         }
       });
       if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
-    } catch (err) { /* fall through to an empty list */ }
-    return [];
+    } catch (err) { /* fall through to the null "could not load" result below */ }
+    // NOT an empty array. Returning [] here is what made the 2026-08-19
+    // month-view 403 invisible, and — worse — it makes conflictFor() see a
+    // surveyor with no appointments, so a failed fetch reads as "everyone is
+    // free" and the double-booking guard silently passes. null means "we do
+    // not know", and every caller must treat that differently from "empty".
+    return null;
   }
 
   function buildMonthCells(year, month) {
@@ -192,7 +201,14 @@
       viewYear: today.getFullYear(),
       viewMonth: today.getMonth(),
       monthMeetings: [],
+      // True when the last month fetch failed outright (permissions, network,
+      // an API cap). While this is true the calendar must not present itself
+      // as an authoritative view of who is free — see ensureMonthLoaded and
+      // the booking submit handler.
+      monthLoadFailed: false,
       surveyors: [],
+      // Same distinction as monthLoadFailed, for the surveyor lookup.
+      surveyorsLoadFailed: false,
       selectedDate: null,
       selectedSurveyorId: null
     };
@@ -300,7 +316,9 @@
 
     function renderLegend() {
       if (state.surveyors.length === 0) {
-        legendEl.innerHTML = '<span class="field-hint">No surveyors found.</span>';
+        legendEl.innerHTML = state.surveyorsLoadFailed
+          ? '<span class="field-hint">Could not load the surveyor list.</span>'
+          : '<span class="field-hint">No surveyors found.</span>';
         return;
       }
       legendEl.innerHTML = state.surveyors.map((u) => `
@@ -355,6 +373,12 @@
       // most a single request can ask for; if a month ever has more meetings than
       // that, this will need real pagination (offset) rather than a bigger number.
       const fetched = await loadMeetingsFrom(monthStartStr, 200);
+      if (fetched === null) {
+        state.monthLoadFailed = true;
+        state.monthMeetings = [];
+        return;
+      }
+      state.monthLoadFailed = false;
       state.monthMeetings = fetched.filter((m) => m.dateStart < nextMonthStartStr);
     }
 
@@ -365,6 +389,9 @@
       await ensureMonthLoaded(year, month);
       if (ctx.isStale()) return;
       renderMonthGrid();
+      if (state.monthLoadFailed) {
+        showStatus('Could not load this month\u2019s appointments, so the calendar below is not showing existing bookings. New bookings are blocked until it loads, to avoid double-booking a surveyor. Try switching month, or reopening the Calendar.', 'err');
+      }
     }
 
     function renderEventRow(m) {
@@ -445,7 +472,9 @@
       }
       const dayMeetings = dayMeetingsFor(dateStr);
       if (state.surveyors.length === 0) {
-        surveyorChipsEl.innerHTML = '<span class="field-hint">No surveyors found.</span>';
+        surveyorChipsEl.innerHTML = state.surveyorsLoadFailed
+          ? '<span class="field-hint">Could not load the surveyor list \u2014 this is not the same as there being none. Try reopening the Calendar; if it keeps happening, report it.</span>'
+          : '<span class="field-hint">No surveyors found.</span>';
         return;
       }
       surveyorChipsEl.innerHTML = state.surveyors.map((u) => {
@@ -548,6 +577,10 @@
       upcomingEl.innerHTML = '<div class="loading-state">Loading…</div>';
       const meetings = await loadMeetingsFrom(`${todayDateStr()} 00:00:00`, 100);
       if (ctx.isStale()) return;
+      if (meetings === null) {
+        upcomingEl.innerHTML = '<div class="empty-state">Could not load upcoming appointments \u2014 this is not the same as there being none. Try reopening the Calendar; if it keeps happening, report it.</div>';
+        return;
+      }
       if (meetings.length === 0) {
         upcomingEl.innerHTML = '<div class="empty-state">No upcoming appointments booked.</div>';
         return;
@@ -598,6 +631,16 @@
       submitBtn.textContent = 'Checking availability…';
       await ensureMonthLoaded(state.viewYear, state.viewMonth);
       if (ctx.isStale()) return;
+      if (state.monthLoadFailed) {
+        // The re-check above is the last line of defence against a double
+        // booking. If it could not read the existing appointments, refuse
+        // rather than book blind — a blocked booking is recoverable, two
+        // surveyors sent to different sites at the same time is not.
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Book appointment';
+        showStatus('Not booked \u2014 the existing appointments for this month could not be loaded, so this surveyor\u2019s availability cannot be checked. Please try again in a moment.', 'err');
+        return;
+      }
       const freshConflict = conflictFor(surveyorId, start, end, dayMeetingsFor(dateStr));
       if (freshConflict) {
         submitBtn.disabled = false;
@@ -650,7 +693,9 @@
 
     await loadMonth(state.viewYear, state.viewMonth);
     if (ctx.isStale()) return;
-    state.surveyors = await loadSurveyors();
+    const loadedSurveyors = await loadSurveyors();
+    state.surveyorsLoadFailed = loadedSurveyors === null;
+    state.surveyors = loadedSurveyors || [];
     if (ctx.isStale()) return;
     renderLegend();
     renderMonthGrid();

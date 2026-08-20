@@ -81,6 +81,18 @@ function reportError({ errorMessage, stackTrace, userAction }) {
  * message. See espoClient.js's `EspoAuthError.expected` for where each
  * failure path decides which bucket it's in.
  */
+// De-duplication window for App Error Tracking. Added 2026-08-20 after a
+// single unresolved 403 on the Messages badge poller (which fires every 2
+// minutes for the whole time the app is open) sent tech@ roughly 40
+// identical emails in one afternoon. A repeating background failure is one
+// problem, not forty, and burying the inbox is how the next genuinely new
+// error gets missed. First occurrence reports immediately; identical
+// repeats inside the window are counted and folded into a single follow-up
+// report when the window closes, so nothing is silently dropped.
+const ERROR_REPORT_WINDOW_MS = 30 * 60 * 1000;
+const recentErrorReports = new Map(); // key -> { firstReportedAt, suppressed }
+const MAX_TRACKED_ERROR_KEYS = 200;
+
 function reportUnexpectedApiFailure(err, userAction) {
   const isAuthErr = err instanceof EspoAuthError;
   const status = isAuthErr ? err.status : undefined;
@@ -89,9 +101,34 @@ function reportUnexpectedApiFailure(err, userAction) {
   if (status === 401) return;
   if (expected) return;
 
+  const errorMessage = err && err.message ? err.message : String(err);
+  const stackTrace = err && err.stack ? err.stack : '(no stack trace)';
+  const key = `${errorMessage}\u241F${userAction}`;
+  const now = Date.now();
+  const seen = recentErrorReports.get(key);
+
+  if (seen && now - seen.firstReportedAt < ERROR_REPORT_WINDOW_MS) {
+    seen.suppressed += 1;
+    return;
+  }
+
+  // Window has closed (or this is the first sighting). If repeats piled up
+  // while it was open, say so in this report rather than losing the count.
+  const repeatNote = seen && seen.suppressed > 0
+    ? ` [repeated ${seen.suppressed} more time(s) in the previous ${Math.round(ERROR_REPORT_WINDOW_MS / 60000)} minutes \u2014 further identical reports are being throttled]`
+    : '';
+
+  if (recentErrorReports.size >= MAX_TRACKED_ERROR_KEYS && !seen) {
+    // Cheap bound: drop the oldest tracked key rather than growing forever
+    // in a long-running session. Map preserves insertion order.
+    const oldest = recentErrorReports.keys().next();
+    if (!oldest.done) recentErrorReports.delete(oldest.value);
+  }
+  recentErrorReports.set(key, { firstReportedAt: now, suppressed: 0 });
+
   reportError({
-    errorMessage: err && err.message ? err.message : String(err),
-    stackTrace: err && err.stack ? err.stack : '(no stack trace)',
+    errorMessage: errorMessage + repeatNote,
+    stackTrace,
     userAction
   });
 }
