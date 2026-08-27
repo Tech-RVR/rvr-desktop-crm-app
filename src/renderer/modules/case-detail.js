@@ -298,6 +298,11 @@
       });
     }
 
+    function todayDateStr() {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    }
+
     function fileToBase64(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -337,7 +342,10 @@
           cCategory: categorySelect.value,
           cSource: 'Staff Upload',
           cReviewStatus: 'Verified',
-          cCaseId: caseId
+          cCaseId: caseId,
+          // EspoCRM's built-in Document entity requires publishDate; a staff
+          // upload has no meaningful publish date of its own, so use today.
+          publishDate: todayDateStr()
         };
         if (categorySelect.value === 'Other') docBody.cCategoryOtherSpecify = otherSpecify;
 
