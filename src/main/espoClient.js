@@ -230,6 +230,23 @@ class EspoClient {
           expected = true;
         }
       } catch (_) { /* ignore parse failure, keep generic message */ }
+
+      // 2026-08-27: some EspoCRM actions (e.g. `PUT UserSecurity/password`
+      // rejecting a wrong current password) throw a Forbidden with NO JSON
+      // body at all — the only place the real reason ever shows up is this
+      // header, exactly like the second-step-required case login() already
+      // reads. Without this, a routine "wrong current password" was
+      // indistinguishable from a genuine unexplained failure: it showed a
+      // guessed on-screen message instead of EspoCRM's real one, and fired a
+      // false-positive App Error Tracking report on every attempt.
+      if (!expected) {
+        const reason = res.headers.get('X-Status-Reason');
+        if (reason) {
+          message = reason;
+          expected = true;
+        }
+      }
+
       throw new EspoAuthError(message, res.status, expected);
     }
 
