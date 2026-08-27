@@ -7,10 +7,16 @@
  * EspoCRM session (see case-detail.js's messages panel for the fuller
  * explanation of why no proxy is needed here, unlike the portal-client side).
  *
- * Requires the CPortalMessage staff-role ACL grant (read=team) — see
- * infrastructure-status.md. Until that lands this screen shows a plain
- * "no access yet" state rather than erroring, same 403 convention as the
- * rest of the app.
+ * Requires the CPortalMessage staff-role ACL grant (read=team), which has
+ * been live since 2026-08-17 — see infrastructure-status.md.
+ *
+ * 2026-08-27: this screen was broken by its own request, not by that grant.
+ * It asked for maxSize: 300, over EspoCRM's hard cap of 200
+ * (recordListMaxSizeLimit), and EspoCRM refuses an over-limit list with a
+ * bare 403. The screen then caught that 403, assumed it was the ACL grant
+ * and showed a reassuring "we're working on a fix" message — so its own bug
+ * hid behind a note about somebody else's. It now pages at 200 and reports
+ * whatever EspoCRM actually said.
  *
  * "Unread" is local-only bookkeeping (see main.js's Store defaults comment
  * on seenMessagesAt) — a genuine per-user server-side read receipt would
@@ -42,27 +48,42 @@
 
     const listEl = container.querySelector('#messages-dash-list');
 
-    const res = await window.rvr.espo.request('CPortalMessage', {
-      query: {
-        select: 'caseId,createdAt,direction,senderName,messageBody',
-        orderBy: 'createdAt',
-        order: 'desc',
-        maxSize: 300
-      }
-    });
+    // EspoCRM hard-caps a list request at 200 (recordListMaxSizeLimit) and
+    // refuses anything larger with a bare 403 — see the note at the top of
+    // this file. Page through instead of asking for more in one go.
+    const PAGE_SIZE = 200;
+    const MAX_MESSAGES = 1000;
+    const all = [];
+    let loadFailed = null;
 
-    if (ctx.isStale()) return;
+    while (all.length < MAX_MESSAGES) {
+      const res = await window.rvr.espo.request('CPortalMessage', {
+        query: {
+          select: 'caseId,createdAt,direction,senderName,messageBody',
+          orderBy: 'createdAt',
+          order: 'desc',
+          maxSize: PAGE_SIZE,
+          offset: all.length
+        }
+      });
 
-    if (!res.ok) {
-      if (res.status === 403) {
-        listEl.innerHTML = '<div class="empty-state">Case messages aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
-      } else {
-        listEl.innerHTML = `<div class="empty-state">Could not load messages (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
-      }
+      if (ctx.isStale()) return;
+
+      if (!res.ok) { loadFailed = res; break; }
+
+      const page = (res.data && res.data.list) || [];
+      all.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
+
+    // A failed read and an empty inbox must never render the same (standing
+    // rule). EspoCRM's own wording stays out of the UI — it goes to tech@ in
+    // the error report instead; see staffFacingMessage in main.js.
+    if (loadFailed) {
+      listEl.innerHTML = '<div class="empty-state">Case messages aren\'t loading right now — a report has been sent to the team and we\'re working on a fix.</div>';
       return;
     }
 
-    const all = (res.data && res.data.list) || [];
     if (!all.length) {
       listEl.innerHTML = '<div class="empty-state">No client messages yet.</div>';
       return;
@@ -89,15 +110,19 @@
 
     // One batched lookup for case numbers/contact names rather than N
     // requests — the same "in" filter shape used elsewhere in this app.
-    const casesRes = await window.rvr.espo.request('Case', {
-      query: {
-        select: 'number,name,contactName',
-        'where[0][type]': 'in',
-        'where[0][attribute]': 'id',
-        'where[0][value][]': caseIds,
-        maxSize: caseIds.length
-      }
-    });
+    // Same cap applies here. caseIds can also be empty (messages with no
+    // case link), and a maxSize of 0 is not a valid request — skip it.
+    const casesRes = caseIds.length
+      ? await window.rvr.espo.request('Case', {
+          query: {
+            select: 'number,name,contactName',
+            'where[0][type]': 'in',
+            'where[0][attribute]': 'id',
+            'where[0][value][]': caseIds,
+            maxSize: Math.min(caseIds.length, 200)
+          }
+        })
+      : { ok: true, data: { list: [] } };
     if (ctx.isStale()) return;
 
     const caseInfo = {};

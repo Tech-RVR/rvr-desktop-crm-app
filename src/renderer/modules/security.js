@@ -330,9 +330,12 @@
         // CURRENTLY AUTHENTICATED user's password — it reads the user id off
         // the request's own login, not a body parameter, so this can never
         // touch anyone else's account (see Api/PutPassword.php).
+        // A 403 here is EspoCRM saying "Wrong password." — an everyday typo,
+        // not a fault. Don't send tech@ an incident report for it.
         const res = await window.rvr.espo.request('UserSecurity/password', {
           method: 'PUT',
-          body: { password: newPassword, currentPassword }
+          body: { password: newPassword, currentPassword },
+          expected403: true
         });
 
         if (ctx.isStale()) return;
@@ -340,7 +343,10 @@
         btn.textContent = 'Change password';
 
         if (!res.ok) {
-          showPasswordStatus(res.message || 'Could not change your password. Check your current password and try again.', 'err');
+          const msg = res.status === 403
+            ? 'That current password is not right. Please check it and try again.'
+            : (res.message || 'Could not change your password. Please try again.');
+          showPasswordStatus(msg, 'err');
           return;
         }
 

@@ -754,7 +754,9 @@
             if (existingAccountRes.ok && existingAccountRes.data && existingAccountRes.data.list && existingAccountRes.data.list.length) {
               resolvedAccountId = existingAccountRes.data.list[0].id;
             } else {
+              // Must carry an assigned user — see the note in case-new.js.
               const accountBody = { name: companyNameVal };
+              if (ctx.user && ctx.user.id) accountBody.assignedUserId = ctx.user.id;
               if (companyPhoneVal) accountBody.phoneNumber = companyPhoneVal;
               if (companyEmailVal) accountBody.emailAddress = companyEmailVal;
               const createAccountRes = await window.rvr.espo.request('Account', { method: 'POST', body: accountBody });
@@ -793,6 +795,8 @@
             const lastName = nameParts.length > 1 ? nameParts.pop() : contactNameVal;
             const firstName = nameParts.join(' ');
             const contactBody = { lastName };
+            // Same reason as the Account create above.
+            if (ctx.user && ctx.user.id) contactBody.assignedUserId = ctx.user.id;
             if (firstName) contactBody.firstName = firstName;
             if (contactPhoneVal) contactBody.phoneNumber = contactPhoneVal;
             if (contactEmailVal) contactBody.emailAddress = contactEmailVal;

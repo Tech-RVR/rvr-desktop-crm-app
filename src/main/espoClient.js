@@ -223,6 +223,28 @@ class EspoClient {
       // See main.js's `reportUnexpectedApiFailure` for what happens with it.
       let message = `EspoCRM request failed (HTTP ${res.status}).`;
       let expected = false;
+
+      // 2026-08-27: EspoCRM returns its 403s with an EMPTY body and puts the
+      // explanation in the X-Status-Reason HEADER. Verified live against the
+      // running CRM: a deliberate over-limit list request came back with a
+      // zero-length body and the header reading "Max size should not exceed
+      // 200. Use offset and limit." Reading only the JSON body therefore
+      // discarded EspoCRM's reason on every single 403, which is why three
+      // completely unrelated failures on 2026-08-27 (a blocked company
+      // create, the Messages screen, a password change) all arrived as the
+      // same contentless "HTTP 403" and were misdiagnosed as one permission
+      // gap. Read the header first; the body still wins if it has anything,
+      // since that is the richer source when EspoCRM does populate it.
+      //
+      // Note on `expected`: a reason header deliberately does NOT mark the
+      // failure as expected. Some of these ARE our own bugs (the maxSize one
+      // above), and this file's standing principle is to fail toward
+      // visibility. The reports now carry a real sentence instead of nothing.
+      const reasonHeader = res.headers.get('X-Status-Reason');
+      if (reasonHeader && reasonHeader.trim()) {
+        message = reasonHeader.trim();
+      }
+
       try {
         const errBody = await res.json();
         if (errBody && errBody.message) {

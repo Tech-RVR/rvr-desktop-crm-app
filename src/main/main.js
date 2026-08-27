@@ -302,14 +302,44 @@ ipcMain.handle('auth:forgotPasswordUrl', async () => {
   return 'https://crm.rvrratingpartners.co.uk/';
 });
 
-ipcMain.handle('espo:request', async (_event, { path: reqPath, method, query, body }) => {
+/**
+ * EspoCRM's own wording is written for developers, not for staff. Now that
+ * espoClient recovers it from the X-Status-Reason header, it reads like
+ * "Assignment failure: assigned user or team not allowed." or "Max size
+ * should not exceed 200." — accurate, and no use at all to David.
+ *
+ * So: the real reason goes to tech@ in the error report, and the app shows a
+ * plain sentence. Screens that know what they were doing can still override
+ * this with something more specific (`res.message || 'my own wording'`).
+ */
+function staffFacingMessage(err, status) {
+  // EspoCRM populated a JSON body message — those are the validation-style
+  // ones already aimed at whoever is using the app, so let them through.
+  if (err instanceof EspoAuthError && err.expected) return err.message;
+
+  if (status === 401) return 'Your session has expired. Please log in again.';
+  if (status === 403) return "This isn't working right now — a report has been sent to the team and we're working on a fix.";
+  if (status === 404) return 'That record could not be found — it may have been deleted.';
+  if (status >= 500) return 'The CRM is not responding right now. Please try again in a minute.';
+
+  return 'Something went wrong — a report has been sent to the team.';
+}
+
+ipcMain.handle('espo:request', async (_event, { path: reqPath, method, query, body, expected403 }) => {
   try {
     const data = await espo.request(reqPath, { method, query, body });
     return { ok: true, data };
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
-    reportUnexpectedApiFailure(err, `API call: ${method || 'GET'} ${reqPath}`);
-    return { ok: false, message: err.message, status };
+
+    // `expected403` lets a caller say "a 403 here is a normal outcome, don't
+    // report it" — the password screen being the case that matters, where a
+    // 403 just means the current password was typed wrong.
+    if (!(status === 403 && expected403)) {
+      reportUnexpectedApiFailure(err, `API call: ${method || 'GET'} ${reqPath}`);
+    }
+
+    return { ok: false, message: staffFacingMessage(err, status), status };
   }
 });
 

@@ -288,7 +288,16 @@
             if (existingAccountRes.ok && existingAccountRes.data && existingAccountRes.data.list && existingAccountRes.data.list.length) {
               accountId = existingAccountRes.data.list[0].id;
             } else {
+              // Assign to the staff member creating it. This is not cosmetic:
+              // since assignmentPermission was set to `team` on 2026-08-20,
+              // EspoCRM refuses to create a record that has neither an
+              // assigned user nor a team (Acl/AssignmentChecker/Helper.php
+              // isPermittedTeamsEmpty), which is what has been blocking new
+              // companies with "Assignment failure: assigned user or team not
+              // allowed." The Case body below has always set this; Account and
+              // Contact did not.
               const accountBody = { name: newCompanyName };
+              if (ctx.user && ctx.user.id) accountBody.assignedUserId = ctx.user.id;
               if (newPhone) accountBody.phoneNumber = newPhone;
               if (newEmail) accountBody.emailAddress = newEmail;
               const createAccountRes = await window.rvr.espo.request('Account', { method: 'POST', body: accountBody });
@@ -308,6 +317,8 @@
             const lastName = nameParts.length > 1 ? nameParts.pop() : newContactName;
             const firstName = nameParts.join(' ');
             const contactBody = { lastName };
+            // Same reason as the Account create above.
+            if (ctx.user && ctx.user.id) contactBody.assignedUserId = ctx.user.id;
             if (firstName) contactBody.firstName = firstName;
             if (newPhone) contactBody.phoneNumber = newPhone;
             if (newEmail) contactBody.emailAddress = newEmail;
