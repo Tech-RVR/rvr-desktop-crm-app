@@ -75,6 +75,14 @@
     const caseInfo = {};
     if (casesRes.ok) {
       ((casesRes.data && casesRes.data.list) || []).forEach((c) => { caseInfo[c.id] = c; });
+    } else {
+      // 2026-08-28: there was no else here. When this second lookup failed,
+      // every row still rendered -- with '#--' for the case number and a
+      // blank client column -- which reads as corrupted data rather than as
+      // a failed read. Standing rule: 'could not load' and 'there is nothing'
+      // must never be the same thing on screen. Fail closed and say so.
+      listEl.innerHTML = `<div class="empty-state">Found ${docs.length} document${docs.length === 1 ? '' : 's'} waiting, but the case details behind them could not be loaded (${ctx.escapeHtml(casesRes.message || 'unknown error')}). Please try again in a moment.</div>`;
+      return;
     }
 
     listEl.innerHTML = `

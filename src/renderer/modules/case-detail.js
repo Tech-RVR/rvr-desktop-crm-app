@@ -10,6 +10,22 @@
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
     ));
   }
+  // EspoCRM wants a plain YYYY-MM-DD for its date-only fields.
+  // 2026-08-28: this lived inside wireCaseDetailsPanel, but the document
+  // upload in wireDocumentsPanel calls it too -- a sibling function, so it
+  // could not see it. Every staff upload threw "todayIsoDate is not defined"
+  // before anything was saved, which is the fault v0.2.26 was meant to fix.
+  // Kept at module level so both callers share one definition.
+  function todayIsoDate() {
+    const d = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  }
+
+  // What EspoCRM's Document.file field will actually accept, read live from
+  // its Metadata on 2026-08-28. Note there is no image type on this list.
+  const ALLOWED_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+    'odt', 'ods', 'odp', 'rtf', 'csv', 'md', 'txt'];
 
   // Real 12-stage pipeline + disputed flag, per EspoCRM_Case_Entity_Scope_DRAFT.md.
   const STAGE_ORDER = [
@@ -341,6 +357,31 @@
       clearStatus();
       const file = fileInput.files && fileInput.files[0];
       if (!file) { showStatus('Choose a file to upload.', 'err'); return; }
+
+      // 2026-08-28: there was no size check and no type check here at all.
+      // Two separate problems that both showed up as an unexplained error:
+      //   1. The file is sent base64-encoded inside the request body, and
+      //      every CRM call is now abandoned after 20 seconds, so a big scan
+      //      failed with 'The CRM did not respond within 20 seconds' -- which
+      //      reads as the CRM being down rather than the file being too big.
+      //   2. EspoCRM's Document.file field has its own allowed-type list and
+      //      refuses anything else with a bare 403. IMAGES ARE NOT ON IT --
+      //      no .jpg, .png or .heic -- so photos are refused by the CRM, from
+      //      the app and the client portal alike. Say so plainly instead of
+      //      letting the CRM answer with a 403 nobody can read.
+      // If the CRM's allowed list is ever widened (Administration > Entity
+      // Manager > Document > file), widen ALLOWED_EXTENSIONS to match or the
+      // app will keep blocking what the CRM would now accept.
+      const MAX_UPLOAD_MB = 10;
+      if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+        showStatus(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB and the limit is ${MAX_UPLOAD_MB}MB. Scan it at a lower quality, or split it into two documents.`, 'err');
+        return;
+      }
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      if (ALLOWED_EXTENSIONS.indexOf(ext) === -1) {
+        showStatus(`The CRM does not accept .${ext} files. It takes ${ALLOWED_EXTENSIONS.join(', ')}. Photos and images cannot be attached yet -- that is a CRM setting, not a fault with this screen.`, 'err');
+        return;
+      }
       const otherSpecify = otherSpecifyInput.value.trim();
       if (categorySelect.value === 'Other' && !otherSpecify) {
         showStatus('Please specify the document type in the box below "Other".', 'err');
@@ -568,12 +609,6 @@
       return { firstName: parts.join(' '), lastName };
     }
 
-    // EspoCRM wants a plain YYYY-MM-DD for its date-only fields.
-    function todayIsoDate() {
-      const d = new Date();
-      const pad = (n) => String(n).padStart(2, '0');
-      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    }
 
     async function paintEdit() {
       editBtn.style.display = 'none';

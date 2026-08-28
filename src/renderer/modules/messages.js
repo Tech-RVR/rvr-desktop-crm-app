@@ -128,6 +128,11 @@
     const caseInfo = {};
     if (casesRes.ok) {
       ((casesRes.data && casesRes.data.list) || []).forEach((c) => { caseInfo[c.id] = c; });
+    } else {
+      // 2026-08-28: same missing else as verification.js. Without it every
+      // row showed '#--' and no client name, looking like broken data.
+      listEl.innerHTML = `<div class="empty-state">There ${caseIds.length === 1 ? 'is' : 'are'} ${caseIds.length} case${caseIds.length === 1 ? '' : 's'} with client messages, but the case details could not be loaded (${ctx.escapeHtml(casesRes.message || 'unknown error')}). Please try again in a moment.</div>`;
+      return;
     }
 
     const rows = caseIds
