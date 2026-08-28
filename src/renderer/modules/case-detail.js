@@ -22,10 +22,13 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   }
 
-  // What EspoCRM's Document.file field will actually accept, read live from
-  // its Metadata on 2026-08-28. Note there is no image type on this list.
+  // What EspoCRM's Document.file field will actually accept. Read live from
+  // GET /api/v1/Metadata on 2026-08-28 (entityDefs.Document.fields.file.accept)
+  // and it DOES include images: .jpg .jpeg .png .heic. An earlier note in this
+  // file said it did not -- that was wrong, and it is why photos looked blocked.
   const ALLOWED_EXTENSIONS = ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
-    'odt', 'ods', 'odp', 'rtf', 'csv', 'md', 'txt'];
+    'odt', 'ods', 'odp', 'rtf', 'csv', 'md', 'txt',
+    'jpg', 'jpeg', 'png', 'heic'];
 
   // Real 12-stage pipeline + disputed flag, per EspoCRM_Case_Entity_Scope_DRAFT.md.
   const STAGE_ORDER = [
@@ -365,13 +368,15 @@
       //      failed with 'The CRM did not respond within 20 seconds' -- which
       //      reads as the CRM being down rather than the file being too big.
       //   2. EspoCRM's Document.file field has its own allowed-type list and
-      //      refuses anything else with a bare 403. IMAGES ARE NOT ON IT --
-      //      no .jpg, .png or .heic -- so photos are refused by the CRM, from
-      //      the app and the client portal alike. Say so plainly instead of
-      //      letting the CRM answer with a 403 nobody can read.
-      // If the CRM's allowed list is ever widened (Administration > Entity
-      // Manager > Document > file), widen ALLOWED_EXTENSIONS to match or the
-      // app will keep blocking what the CRM would now accept.
+      //      refuses anything else with a bare 403. Photos ARE on that list
+      //      (.jpg .jpeg .png .heic), confirmed live on 2026-08-28. Say what
+      //      is wrong plainly instead of letting the CRM answer with a 403
+      //      nobody can read.
+      // ALLOWED_EXTENSIONS must stay in step with the CRM's own list
+      // (Administration > Entity Manager > Document > file). If that list is
+      // changed, change ALLOWED_EXTENSIONS to match, or this screen will block
+      // what the CRM would now accept -- which is exactly what happened with
+      // photos before v0.2.28.
       const MAX_UPLOAD_MB = 10;
       if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
         showStatus(`That file is ${(file.size / 1024 / 1024).toFixed(1)}MB and the limit is ${MAX_UPLOAD_MB}MB. Scan it at a lower quality, or split it into two documents.`, 'err');
@@ -379,7 +384,7 @@
       }
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       if (ALLOWED_EXTENSIONS.indexOf(ext) === -1) {
-        showStatus(`The CRM does not accept .${ext} files. It takes ${ALLOWED_EXTENSIONS.join(', ')}. Photos and images cannot be attached yet -- that is a CRM setting, not a fault with this screen.`, 'err');
+        showStatus(`The CRM does not accept .${ext} files. It takes ${ALLOWED_EXTENSIONS.join(', ')}.`, 'err');
         return;
       }
       const otherSpecify = otherSpecifyInput.value.trim();

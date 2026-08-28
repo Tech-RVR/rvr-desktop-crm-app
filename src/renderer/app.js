@@ -293,17 +293,11 @@ async function refreshMessagesBadge() {
   const badge = document.getElementById('messages-badge');
   if (!badge) return; // shell not built, or user has navigated away from it
 
-  // 2026-08-28, two separate faults in this one block:
-  //
-  //  1. It collapsed every message to the newest-per-case and then counted
-  //     CASES. Five messages from one client showed as "1" next to a speech
-  //     bubble that plainly reads as "you have N messages".
-  //  2. It had no owner filter at all, so with CPortalMessage read scoped to
-  //     the team, David's badge counted Maria's and Lucy's client messages
-  //     too and never matched anything he considered his.
-  //
-  // Tyrone's decision (2026-08-28): count messages, and scope the badge to
-  // the signed-in person's own cases.
+  // Tyrone's decision (2026-08-28): the badge counts YOUR OWN CASES that have
+  // new client messages. "3" means three of your clients are waiting on you,
+  // which is the thing a person acts on. Not a message total, and not other
+  // people's cases — the Messages screen still lists everyone's, and marks
+  // the ones that are not yours with the owner's colour and initials.
   const myCaseIds = await myOpenCaseIds();
   if (myCaseIds === null) { showBadgeUnavailable(badge); return; }
   if (myCaseIds.length === 0) { badge.style.display = 'none'; return; }
@@ -329,16 +323,24 @@ async function refreshMessagesBadge() {
   if (!res.ok) { showBadgeUnavailable(badge); return; }
 
   const seenMap = (await window.rvr.messages.getSeen()) || {};
-  const unreadMessageCount = ((res.data && res.data.list) || []).filter((m) => {
-    if (!m.caseId) return false;
+
+  // Count distinct CASES that have at least one client message newer than the
+  // last time this person opened that case's messages.
+  const casesWithNews = new Set();
+  ((res.data && res.data.list) || []).forEach((m) => {
+    if (!m.caseId) return;
     const seenAt = seenMap[m.caseId];
-    return !seenAt || new Date(m.createdAt) > new Date(seenAt);
-  }).length;
+    if (!seenAt || new Date(m.createdAt) > new Date(seenAt)) casesWithNews.add(m.caseId);
+  });
+  const unreadCaseCount = casesWithNews.size;
 
   badge.classList.remove('nav-badge-unknown');
   badge.removeAttribute('title');
-  if (unreadMessageCount > 0) {
-    badge.textContent = unreadMessageCount > 99 ? '99+' : String(unreadMessageCount);
+  if (unreadCaseCount > 0) {
+    badge.textContent = unreadCaseCount > 99 ? '99+' : String(unreadCaseCount);
+    badge.title = unreadCaseCount === 1
+      ? '1 of your cases has a new client message'
+      : `${unreadCaseCount} of your cases have new client messages`;
     badge.style.display = '';
   } else {
     badge.style.display = 'none';
@@ -368,7 +370,7 @@ async function myOpenCaseIds() {
 function showBadgeUnavailable(badge) {
   badge.textContent = '!';
   badge.classList.add('nav-badge-unknown');
-  badge.title = 'Unread message count is unavailable right now.';
+  badge.title = 'The count of cases with new messages is unavailable right now.';
   badge.style.display = '';
 }
 

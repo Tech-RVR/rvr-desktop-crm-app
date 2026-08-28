@@ -322,6 +322,26 @@ input[type=number], input[type=email], input[type=tel], .form-panel textarea{
 tr.unread-row{ font-weight:600; }
 .unread-dot{ display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--accent2); }
 td.message-preview{ color:var(--muted); font-weight:400; }
+/* 2026-08-28: per-case message count on the Messages screen. The sidebar
+   badge says how many CASES are waiting; this says how many messages are on
+   each one, with the "+N" part being what has arrived since you last opened
+   that case. Grey when there is nothing new, red once there is. */
+.count-badge{
+  display:inline-block; background:var(--line,#E3E8EB); color:var(--muted,#5B6B74);
+  font-size:11px; font-weight:700; border-radius:20px; padding:1px 8px; line-height:1.6;
+  white-space:nowrap;
+}
+.count-badge.count-badge-new{ background:var(--danger); color:#fff; }
+.count-badge .count-badge-new-part{ opacity:.85; font-weight:600; }
+/* Somebody else's case: the badge takes that person's own colour and carries
+   their initials, so you can see at a glance which rows are not yours. The
+   colour is worked out from their user id, the same way the calendar colours
+   surveyors, so one person is one colour across both screens. */
+.count-badge.count-badge-owned{ color:#fff; padding-left:3px; }
+.count-badge .count-badge-owner{
+  display:inline-block; background:rgba(255,255,255,.28); border-radius:20px;
+  padding:0 5px; margin-right:5px; font-size:10px; letter-spacing:.3px;
+}
 
 /* ---- Sidebar nav badge (Messages unread count) ---- */
 .nav-item{ position:relative; }

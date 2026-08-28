@@ -143,28 +143,58 @@
   // so any additional narrowing (an upper date bound, a single day) is done
   // client-side on the returned list rather than guessing at an unverified
   // 'lessThan'-style operator name.
+  // 2026-08-28: this asked for one page of `limit` records and took whatever
+  // came back. EspoCRM caps a page at 200, so a month with more than 200
+  // appointments returned exactly 200 and the calendar treated that as the
+  // whole month -- every appointment past the 200th was invisible, those days
+  // looked free, and the double-booking guard would have waved a clash
+  // straight through. It now pages with `offset` and, when it still cannot
+  // read everything, says so (`truncated`) instead of quietly returning a
+  // partial answer that looks complete.
+  //
+  // Returns { list, truncated } on success, or null when the read FAILED --
+  // never an empty array for a failure. Returning [] here is what made the
+  // 2026-08-19 month-view 403 invisible, and -- worse -- it makes
+  // conflictFor() see a surveyor with no appointments, so a failed fetch
+  // reads as "everyone is free" and the double-booking guard silently
+  // passes. Every caller must treat null and empty differently.
+  const MEETINGS_PAGE_SIZE = 200; // EspoCRM's recordListMaxSizeLimit
+
   async function loadMeetingsFrom(startStr, limit) {
+    const list = [];
     try {
-      const res = await window.rvr.espo.request('Meeting', {
-        query: {
-          'where[0][type]': 'greaterThanOrEquals',
-          'where[0][attribute]': 'dateStart',
-          'where[0][value]': startStr,
-          orderBy: 'dateStart',
-          order: 'asc',
-          maxSize: limit,
-          select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus,cAcceptanceStatus,usersIds'
-        }
-      });
-      if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
+      while (list.length < limit) {
+        const res = await window.rvr.espo.request('Meeting', {
+          query: {
+            'where[0][type]': 'greaterThanOrEquals',
+            'where[0][attribute]': 'dateStart',
+            'where[0][value]': startStr,
+            orderBy: 'dateStart',
+            order: 'asc',
+            maxSize: Math.min(MEETINGS_PAGE_SIZE, limit - list.length),
+            offset: list.length,
+            select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus,cAcceptanceStatus,usersIds'
+          }
+        });
+        if (!(res && res.ok && res.data && Array.isArray(res.data.list))) return null;
+        const page = res.data.list;
+        list.push(...page);
+        const total = typeof res.data.total === 'number' ? res.data.total : null;
+        if (total !== null && list.length >= total) return { list, truncated: false };
+        if (page.length < MEETINGS_PAGE_SIZE) return { list, truncated: false };
+        if (list.length >= limit) return { list, truncated: total === null ? true : total > list.length };
+      }
+      return { list, truncated: false };
     } catch (err) { /* fall through to the null "could not load" result below */ }
-    // NOT an empty array. Returning [] here is what made the 2026-08-19
-    // month-view 403 invisible, and — worse — it makes conflictFor() see a
-    // surveyor with no appointments, so a failed fetch reads as "everyone is
-    // free" and the double-booking guard silently passes. null means "we do
-    // not know", and every caller must treat that differently from "empty".
     return null;
   }
+
+  // A cancelled visit ("Not Held") is not a booking any more. It must not
+  // block a slot (see conflictFor), must not put a dot on the month grid and
+  // must not sit in Upcoming Appointments as though someone is attending it.
+  // It is still listed inside the day pop-up, marked cancelled, so nothing
+  // vanishes without explanation.
+  function isLiveBooking(m) { return m && m.status !== 'Not Held'; }
 
   function buildMonthCells(year, month) {
     const firstWeekday = new Date(year, month, 1).getDay(); // 0=Sun..6=Sat
@@ -224,6 +254,10 @@
       // as an authoritative view of who is free — see ensureMonthLoaded and
       // the booking submit handler.
       monthLoadFailed: false,
+      // True when the month loaded but we know we did not get all of it (more
+      // appointments than the API will hand over). Treated exactly like a
+      // failure for booking purposes — see the submit handler.
+      monthTruncated: false,
       surveyors: [],
       // Same distinction as monthLoadFailed, for the surveyor lookup.
       surveyorsLoadFailed: false,
@@ -282,8 +316,9 @@
               <input type="text" id="cal-location" placeholder="Property being surveyed" autocomplete="off">
             </div>
             <div class="field">
-              <label for="cal-case">Linked case ID (optional)</label>
-              <input type="text" id="cal-case" placeholder="Case ID, if this visit relates to an existing case" autocomplete="off">
+              <label for="cal-case">Linked case (optional)</label>
+              <input type="text" id="cal-case" placeholder="Case number, e.g. 104" autocomplete="off">
+              <span class="field-hint">The case number shown on the Cases screen. Leave empty if this visit is not for an existing case.</span>
             </div>
             <div class="field">
               <label for="cal-notes">Notes</label>
@@ -396,8 +431,17 @@
 
       daysEl.innerHTML = cells.map((c) => {
         const dateStr = dateStrOf(c.year, c.month, c.day);
-        const dayMeetings = dayMeetingsFor(dateStr);
-        const surveyorIds = [...new Set(dayMeetings.map((m) => m.assignedUserId).filter(Boolean))];
+        // 2026-08-28: cancelled visits were still dotted here, so a day that
+        // had been called off still read as booked at a glance. Also, a visit
+        // the surveyor only ATTENDS (assigned to whoever booked it) was
+        // coloured by the booker, whose colour is not even in the legend -
+        // use everyone involved instead.
+        const dayMeetings = dayMeetingsFor(dateStr).filter(isLiveBooking);
+        const surveyorIds = [...new Set(dayMeetings.reduce((acc, m) => {
+          if (m.assignedUserId) acc.push(m.assignedUserId);
+          if (Array.isArray(m.usersIds)) acc.push(...m.usersIds);
+          return acc;
+        }, []).filter(Boolean))];
         const shown = surveyorIds.slice(0, 4);
         const extra = surveyorIds.length - shown.length;
         const classes = ['cal-day'];
@@ -443,14 +487,18 @@
       windowEnd.setUTCDate(windowEnd.getUTCDate() + 7);
       const windowEndStr = `${windowEnd.getUTCFullYear()}-${pad(windowEnd.getUTCMonth() + 1)}-${pad(windowEnd.getUTCDate())} 00:00:00`;
 
-      const fetched = await loadMeetingsFrom(windowStartStr, 200);
+      // 1000 = five full pages. Far more than a real month of site visits,
+      // and a hard stop so a runaway data set can never spin here.
+      const fetched = await loadMeetingsFrom(windowStartStr, 1000);
       if (fetched === null) {
         state.monthLoadFailed = true;
+        state.monthTruncated = false;
         state.monthMeetings = [];
         return;
       }
       state.monthLoadFailed = false;
-      state.monthMeetings = fetched.filter((m) => m.dateStart < windowEndStr);
+      state.monthTruncated = fetched.truncated;
+      state.monthMeetings = fetched.list.filter((m) => m.dateStart < windowEndStr);
     }
 
     async function loadMonth(year, month) {
@@ -464,6 +512,10 @@
         const msg = 'Could not load this month\u2019s appointments, so the calendar below is NOT showing existing bookings \u2014 an empty day here does not mean the day is free. New bookings are blocked until it loads, to avoid double-booking a surveyor. Try switching month, or reopening the Calendar.';
         showStatus(msg, 'err');
         showMonthBanner(msg);
+      } else if (state.monthTruncated) {
+        const msg = 'There are more appointments this month than this screen can read in one go, so some are not shown and an empty slot here may not really be free. New bookings are blocked while that is true, to avoid double-booking a surveyor. Please report this — it needs a change to the app.';
+        showStatus(msg, 'err');
+        showMonthBanner(msg);
       } else {
         clearMonthBanner();
       }
@@ -471,7 +523,8 @@
 
     function renderEventRow(m) {
       const color = surveyorColor(m.assignedUserId);
-      const canRespond = ctx.user && m.assignedUserId && ctx.user.id === m.assignedUserId;
+      // No point offering Accept/Decline on a visit that has been called off.
+      const canRespond = ctx.user && m.assignedUserId && ctx.user.id === m.assignedUserId && isLiveBooking(m);
       return `
         <div class="cal-event-row">
           <div class="cal-event-time">${ctx.escapeHtml(formatTimeRange(timeOf(m.dateStart), timeOf(m.dateEnd)))}</div>
@@ -481,7 +534,9 @@
             <div class="cal-event-meta">
               ${ctx.escapeHtml(m.assignedUserName || 'Unassigned')}
               ${m.parentType === 'Case' && m.parentName ? ` · <span class="cal-case-link" data-case-id="${ctx.escapeHtml(m.parentId)}" style="cursor:pointer; text-decoration:underline;">${ctx.escapeHtml(m.parentName)}</span>` : ''}
-              · <span class="${acceptancePillClass(m.cAcceptanceStatus)}">${ctx.escapeHtml((m.cAcceptanceStatus && m.cAcceptanceStatus !== 'None') ? m.cAcceptanceStatus : 'Pending')}</span>
+              · ${isLiveBooking(m)
+                ? `<span class="${acceptancePillClass(m.cAcceptanceStatus)}">${ctx.escapeHtml((m.cAcceptanceStatus && m.cAcceptanceStatus !== 'None') ? m.cAcceptanceStatus : 'Pending')}</span>`
+                : '<span class="pill neutral">Cancelled</span>'}
             </div>
           </div>
           ${canRespond ? `
@@ -672,8 +727,11 @@
 
     async function refreshUpcoming() {
       upcomingEl.innerHTML = '<div class="loading-state">Loading…</div>';
-      const meetings = await loadMeetingsFrom(`${todayDateStr()} 00:00:00`, 100);
+      const fetched = await loadMeetingsFrom(`${todayDateStr()} 00:00:00`, 200);
       if (ctx.isStale()) return;
+      // Cancelled visits are not upcoming appointments. They stay visible in
+      // the day pop-up, marked cancelled, but nobody is attending them.
+      const meetings = fetched === null ? null : fetched.list.filter(isLiveBooking);
       if (meetings === null) {
         upcomingEl.innerHTML = '<div class="empty-state">Could not load upcoming appointments \u2014 this is not the same as there being none. Try reopening the Calendar; if it keeps happening, report it.</div>';
         return;
@@ -728,14 +786,16 @@
       submitBtn.textContent = 'Checking availability…';
       await ensureMonthLoaded(state.viewYear, state.viewMonth);
       if (ctx.isStale()) return;
-      if (state.monthLoadFailed) {
+      if (state.monthLoadFailed || state.monthTruncated) {
         // The re-check above is the last line of defence against a double
         // booking. If it could not read the existing appointments, refuse
         // rather than book blind — a blocked booking is recoverable, two
         // surveyors sent to different sites at the same time is not.
         submitBtn.disabled = false;
         submitBtn.textContent = 'Book appointment';
-        showStatus('Not booked \u2014 the existing appointments for this month could not be loaded, so this surveyor\u2019s availability cannot be checked. Please try again in a moment.', 'err');
+        showStatus(state.monthTruncated
+          ? 'Not booked \u2014 there are more appointments this month than this screen can read in one go, so this surveyor\u2019s availability cannot be checked properly. Please report this.'
+          : 'Not booked \u2014 the existing appointments for this month could not be loaded, so this surveyor\u2019s availability cannot be checked. Please try again in a moment.', 'err');
         return;
       }
       const freshConflict = conflictFor(surveyorId, start, end, dayMeetingsFor(dateStr));
@@ -746,6 +806,39 @@
         renderSlotOptions(dateStr);
         renderSurveyorChips(dateStr, start, end);
         return;
+      }
+
+      // 2026-08-28: whatever was typed in the case box was attached to the
+      // Meeting without ever being checked. A typo, a case number typed where
+      // an id was wanted, or a stray space produced a booking silently linked
+      // to nothing - and nobody found out until someone went looking for the
+      // visit on the case. Look it up first, accept a plain case NUMBER as
+      // well as an id, and refuse to book rather than link to thin air.
+      let resolvedCase = null;
+      if (caseId) {
+        const looksLikeNumber = /^[0-9]+$/.test(caseId);
+        const lookup = looksLikeNumber
+          ? await window.rvr.espo.request('Case', {
+            query: {
+              select: 'id,name,number',
+              'where[0][type]': 'equals',
+              'where[0][attribute]': 'number',
+              'where[0][value]': Number(caseId),
+              maxSize: 2
+            }
+          })
+          : await window.rvr.espo.request(`Case/${encodeURIComponent(caseId)}`, {});
+        if (ctx.isStale()) return;
+        const found = looksLikeNumber
+          ? ((lookup && lookup.ok && lookup.data && lookup.data.list) || [])[0]
+          : (lookup && lookup.ok ? lookup.data : null);
+        if (!found || !found.id) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Book appointment';
+          showStatus(`Not booked — no case matches "${caseId}". Leave the box empty if this visit is not for an existing case, or copy the case number from the Cases screen.`, 'err');
+          return;
+        }
+        resolvedCase = found;
       }
 
       const dateStart = `${dateStr} ${start}:00`;
@@ -763,7 +856,7 @@
         cResponseToken: token
       };
       if (notes) body.description = notes;
-      if (caseId) { body.parentType = 'Case'; body.parentId = caseId; }
+      if (resolvedCase) { body.parentType = 'Case'; body.parentId = resolvedCase.id; }
 
       submitBtn.textContent = 'Booking…';
       showStatus('Booking the appointment…', 'info');
