@@ -43,6 +43,51 @@
  */
 
 (function () {
+  // Renders `text` as a QR code into `canvas`. Falls back to showing the key
+  // on its own if anything goes wrong - a missing QR code must never be the
+  // thing that stops someone turning two-factor on.
+  function drawTotpQr(canvas, text, secret, ctx) {
+    if (!canvas) return;
+    try {
+      if (typeof qrcode !== 'function') throw new Error('QR generator not loaded');
+      // Type 0 = pick the smallest version that fits. 'M' is the error
+      // correction level authenticator apps expect.
+      const qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+
+      const count = qr.getModuleCount();
+      const quiet = 4;                       // the spec's required quiet zone
+      const size = canvas.width;
+      const cell = Math.floor(size / (count + quiet * 2));
+      const drawn = cell * (count + quiet * 2);
+      const offset = Math.floor((size - drawn) / 2);
+
+      const g = canvas.getContext('2d');
+      g.fillStyle = '#ffffff';
+      g.fillRect(0, 0, size, size);
+      g.fillStyle = '#000000';
+      for (let row = 0; row < count; row += 1) {
+        for (let col = 0; col < count; col += 1) {
+          if (!qr.isDark(row, col)) continue;
+          g.fillRect(
+            offset + (col + quiet) * cell,
+            offset + (row + quiet) * cell,
+            cell,
+            cell
+          );
+        }
+      }
+    } catch (err) {
+      const wrap = canvas.parentNode;
+      if (wrap) {
+        wrap.innerHTML = `<div class="field-hint">The QR code could not be drawn. Add the account by hand using the key below.</div>`;
+      }
+      const details = wrap && wrap.parentNode && wrap.parentNode.querySelector('details');
+      if (details) details.open = true;
+    }
+  }
+
   // Director/Administrator EspoCRM Role id — same id the live DIR-04 Formula
   // rule on Case checks (see infrastructure-status.md /
   // EspoCRM_Case_Entity_Scope_DRAFT.md). Used here purely as a soft,
@@ -233,10 +278,25 @@
 
         const otpauthUri = `otpauth://totp/${encodeURIComponent(label)}?secret=${secret}&issuer=${encodeURIComponent('RVR Ratings CRM')}`;
 
+        // 2026-08-28: there was no QR code - Tyrone asked for one. The screen
+        // printed the raw otpauth:// link as small grey text underneath the
+        // key, which to a non-technical user reads as a SECOND thing to type
+        // and is most of the confusion. Now: scan the code, or open the
+        // manual key if the camera is not an option, and the raw link is
+        // gone from the screen entirely.
+        //
+        // Drawn into a <canvas>, deliberately not an <img src="data:...">.
+        // The page's CSP is default-src 'self', which governs img-src too, so
+        // a data: URI would be silently blocked and leave a broken image.
         bodyEl.innerHTML = `
-          <p>In your authenticator app, add a new account and enter this key manually (no camera needed):</p>
-          <div class="totp-secret-box">${ctx.escapeHtml(secret)}</div>
-          <p style="color:var(--muted); font-size:12px; word-break:break-all;">${ctx.escapeHtml(otpauthUri)}</p>
+          <p>Open your authenticator app, choose to add an account, and scan this:</p>
+          <div id="totp-qr-wrap" style="display:flex; justify-content:center; margin:14px 0;">
+            <canvas id="totp-qr" width="220" height="220" aria-label="Two-factor setup QR code"></canvas>
+          </div>
+          <details style="margin-bottom:12px;">
+            <summary style="cursor:pointer; color:var(--muted); font-size:13px;">No camera? Enter the key by hand instead</summary>
+            <div class="totp-secret-box" style="margin-top:8px;">${ctx.escapeHtml(secret)}</div>
+          </details>
           <div class="status-banner" id="security-status"></div>
           <div class="field">
             <label for="security-confirm-code">6-digit code from your app</label>
@@ -248,6 +308,8 @@
           </div>
         `;
 
+        drawTotpQr(bodyEl.querySelector('#totp-qr'), otpauthUri, secret, ctx);
+
         bodyEl.querySelector('#security-confirm-cancel').addEventListener('click', () => paintStatus());
         bodyEl.querySelector('#security-confirm-btn').addEventListener('click', async () => {
           const code = bodyEl.querySelector('#security-confirm-code').value.trim();
@@ -256,9 +318,26 @@
           confirmBtn.disabled = true;
           confirmBtn.textContent = 'Confirming…';
 
+          // 2026-08-28: this payload was missing `auth2FA: true`, and that
+          // single omission meant two-factor could never be switched on.
+          // Read from EspoCRM 10.0.4's own source on the running container,
+          // Espo/Tools/UserSecurity/Service.php:
+          //   :227  auth2FA is only set if the key is present - absent, it
+          //         stays false
+          //   :235  if (!auth2FA) { auth2FAMethod = null }  <- wipes the
+          //         method we just sent
+          //   :247  the verify branch requires auth2FA truthy AND changed,
+          //         so verifyData() never ran and the code was never checked
+          // The PUT then returned 200 and the panel repainted as "Off". A
+          // staff member typed a correct code, saw no error, and 2FA was
+          // still off.
+          //
+          // `secret` is deliberately not sent: TotpUserSetup::verifyData()
+          // (:70-93) reads the stored auth2FATotpSecret, which the setup call
+          // already saved. Sending it did nothing and read as though it did.
           const confirmRes = await window.rvr.espo.request(`UserSecurity/${userId}`, {
             method: 'PUT',
-            body: { password, code, secret: pendingSecret, auth2FAMethod: 'Totp' }
+            body: { password, code, auth2FA: true, auth2FAMethod: 'Totp' }
           });
 
           if (ctx.isStale()) return;

@@ -189,13 +189,22 @@
       statusEl.className = `status-banner show ${kind}`;
     }
 
+    // 2026-08-28: every path in here replaces the select's innerHTML, which
+    // wipes the user's selection but fires NO change event - so
+    // syncNewContactFieldsState never re-ran and the four "new company /
+    // contact" boxes stayed greyed out from an earlier pick. Search again,
+    // find nobody, and you could neither pick an existing contact nor type a
+    // new one; submitting from there created a case with no client attached
+    // and no warning. Every exit from this function now re-syncs.
     function fillContacts(result) {
       if (!result.ok) {
         contactSelect.innerHTML = '<option value="">Could not load contacts</option>';
+        syncNewContactFieldsState();
         return;
       }
       if (result.list.length === 0) {
         contactSelect.innerHTML = '<option value="">No matching contacts</option>';
+        syncNewContactFieldsState();
         return;
       }
       contactSelect.innerHTML =
@@ -203,6 +212,7 @@
         result.list
           .map((c) => `<option value="${ctx.escapeHtml(c.id)}">${ctx.escapeHtml(contactLabel(c))}</option>`)
           .join('');
+      syncNewContactFieldsState();
     }
 
     fillContacts(await searchContacts(''));
@@ -225,6 +235,7 @@
       searchTimer = setTimeout(async () => {
         const mySeq = ++searchSeq;
         contactSelect.innerHTML = '<option value="">Searching…</option>';
+        syncNewContactFieldsState();
         const result = await searchContacts(searchInput.value.trim());
         if (mySeq !== searchSeq || ctx.isStale()) return;
         fillContacts(result);
@@ -236,9 +247,16 @@
         .forEach((id) => { el(id).value = ''; });
       el('nc-relief').value = '';
       contactSelect.value = '';
+      createdInThisAttempt.contactId = '';
+      createdInThisAttempt.accountId = '';
       syncNewContactFieldsState();
       statusEl.className = 'status-banner';
     });
+
+    // 2026-08-28: survives across click attempts on purpose - see the note
+    // where it is read below. Cleared by "Clear form" and after a case is
+    // successfully created.
+    const createdInThisAttempt = { contactId: '', accountId: '' };
 
     submitBtn.addEventListener('click', async () => {
       const name = el('nc-name').value.trim();
@@ -266,6 +284,16 @@
 
       let contactId = contactSelect.value;
       let accountId = '';
+
+      // 2026-08-28: creating a case is three steps - company, contact, case.
+      // If the LAST one failed, the first two had already landed, but nothing
+      // remembered them: contactId and accountId were declared inside this
+      // handler, so pressing Create again created a SECOND contact. Third
+      // press, third contact. (The company was always safe - it is looked up
+      // by name and reused.) These two now survive a retry, so a second
+      // attempt reuses what already exists instead of duplicating it.
+      if (createdInThisAttempt.contactId) contactId = createdInThisAttempt.contactId;
+      if (createdInThisAttempt.accountId) accountId = createdInThisAttempt.accountId;
 
       if (!contactId) {
         const newCompanyName = newCompanyEl.value.trim();
@@ -309,13 +337,18 @@
                 return;
               }
               accountId = createAccountRes.data && createAccountRes.data.id;
+              createdInThisAttempt.accountId = accountId;
             }
           }
 
           if (newContactName) {
-            const nameParts = newContactName.split(' ').filter(Boolean);
-            const lastName = nameParts.length > 1 ? nameParts.pop() : newContactName;
-            const firstName = nameParts.join(' ');
+            // 2026-08-28: `"Madonna".split(' ')` never reaches pop(), so the
+            // old inline version put the whole name in BOTH firstName and
+            // lastName and the contact read "Madonna Madonna" everywhere -
+            // the CRM, the portal, and any email merging a client's name in.
+            const parts = String(newContactName).trim().split(/\s+/).filter(Boolean);
+            const lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+            const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
             const contactBody = { lastName };
             // Same reason as the Account create above.
             if (ctx.user && ctx.user.id) contactBody.assignedUserId = ctx.user.id;
@@ -332,6 +365,7 @@
               return;
             }
             contactId = createContactRes.data && createContactRes.data.id;
+            createdInThisAttempt.contactId = contactId;
           }
         }
       }

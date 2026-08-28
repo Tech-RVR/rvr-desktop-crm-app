@@ -23,6 +23,23 @@
 
 const BASE_URL = 'https://crm.rvrratingpartners.co.uk/api/v1';
 
+// 2026-08-28: every fetch in this file and in n8nClient.js was issued with no
+// time limit. Node's fetch will not give up on a stalled connection in any
+// useful timeframe, so a CRM that was up but wedged produced a promise that
+// never settled - no error, no report, and every screen stuck on "Loading..."
+// until the app was force-quit. 20 seconds is comfortably longer than any
+// real call here and short enough that a staff member gets a real answer.
+const REQUEST_TIMEOUT_MS = 20000;
+
+function requestTimeoutSignal() {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    }
+  } catch (_) { /* fall through - an older runtime simply gets no timeout */ }
+  return undefined;
+}
+
 class EspoAuthError extends Error {
   /**
    * `expected` marks a failure as a routine, understood, staff-facing outcome
@@ -194,19 +211,55 @@ class EspoClient {
     if (query && Object.keys(query).length) {
       const params = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {
-        if (value !== undefined && value !== null) params.append(key, value);
+        if (value === undefined || value === null) continue;
+        // 2026-08-28: URLSearchParams.append() runs String() over an array,
+        // so an `in` filter's values reached EspoCRM as ONE comma-joined
+        // value and matched zero rows — with HTTP 200 and no error at all.
+        // Proven live against the running CRM: the flattened form returned
+        // total 0 where repeated params returned total 10. That silently
+        // emptied the Director's colleague-reset list every single time, and
+        // blanked case numbers on Messages and Verification whenever more
+        // than one case was involved. Append each element separately so PHP
+        // parses a real array on the other end.
+        if (Array.isArray(value)) {
+          for (const item of value) {
+            if (item !== undefined && item !== null) params.append(key, item);
+          }
+          continue;
+        }
+        params.append(key, value);
       }
       url += `?${params.toString()}`;
     }
 
-    const res = await fetch(url, {
-      method,
-      headers: {
-        Authorization: this._authHeader,
-        'Content-Type': 'application/json'
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: this._authHeader,
+          'Content-Type': 'application/json'
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: requestTimeoutSignal()
+      });
+    } catch (err) {
+      // 2026-08-28: no request in this app had a time limit. If the CRM was
+      // up but wedged, the promise never settled — so the catch blocks in
+      // every screen never ran either, and staff sat on "Loading…" forever
+      // with nothing reported to anyone. Status 0 means "never got an
+      // answer", and main.js turns that into plain copy for the user while
+      // still reporting it, because a server that stops answering is a
+      // fault worth seeing.
+      const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      throw new EspoAuthError(
+        timedOut
+          ? `The CRM did not respond within ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds.`
+          : 'Could not reach the CRM.',
+        0,
+        false
+      );
+    }
 
     if (res.status === 401) {
       // Session-equivalent expired / credentials no longer valid.
@@ -270,19 +323,36 @@ class EspoClient {
       throw new EspoAuthError('Not logged in.', 401, true);
     }
 
-    const res = await fetch(`${BASE_URL}/Attachment/file/${encodeURIComponent(fileId)}`, {
-      method: 'GET',
-      headers: { Authorization: this._authHeader }
-    });
+    let res;
+    try {
+      res = await fetch(`${BASE_URL}/Attachment/file/${encodeURIComponent(fileId)}`, {
+        method: 'GET',
+        headers: { Authorization: this._authHeader },
+        signal: requestTimeoutSignal()
+      });
+    } catch (err) {
+      const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+      throw new EspoAuthError(
+        timedOut ? 'The CRM did not respond in time while fetching that file.' : 'Could not reach the CRM.',
+        0,
+        false
+      );
+    }
 
     if (res.status === 401) {
       this.logout();
       throw new EspoAuthError('Your session has expired. Please log in again.', 401, true);
     }
     if (!res.ok) {
-      // This one never reads the response body, so there's no expected/
-      // unexpected distinction to make — always report it.
-      throw new EspoAuthError(`Could not download that file (HTTP ${res.status}).`, res.status, false);
+      // 2026-08-28: v0.2.25 taught request() to read EspoCRM's reason out of
+      // the X-Status-Reason header, but this path was missed — so a failed
+      // download still produced the contentless error that fix existed to
+      // eliminate. Read it here too.
+      const reasonHeader = res.headers.get('X-Status-Reason');
+      const reason = reasonHeader && reasonHeader.trim()
+        ? reasonHeader.trim()
+        : `Could not download that file (HTTP ${res.status}).`;
+      throw new EspoAuthError(reason, res.status, false);
     }
 
     const arrayBuffer = await res.arrayBuffer();

@@ -152,9 +152,22 @@ async function renderLoginScreen() {
         }
         return;
       }
-      // A genuine failure resets back to the credentials step so a mistyped
-      // password doesn't strand someone on a code prompt with no way back.
+      // 2026-08-28: a WRONG six-digit code comes back down the ordinary
+      // failed-login path with no second-step header, so this used to throw
+      // the user all the way back to the username and password screen saying
+      // "Incorrect username or password." for a fat-fingered digit - and
+      // worst case they went and reset a password that was fine. Keep them on
+      // the code step and say what actually happened; only a genuinely
+      // unrecoverable failure sends them back to the start.
       if (awaitingCode) {
+        const looksLikeSession = res.status === 401 && /session|expired/i.test(res.message || '');
+        if (!looksLikeSession) {
+          showStatus(
+            'That code was not accepted. Check the current code in your authenticator app - they change every 30 seconds - and make sure your phone\u2019s clock is set automatically.',
+            'err'
+          );
+          return;
+        }
         awaitingCode = false;
         credentialsStepEl.style.display = '';
         codeStepEl.style.display = 'none';
@@ -166,6 +179,16 @@ async function renderLoginScreen() {
 
     state.user = res.user;
     const loginScreen = document.getElementById('login-screen');
+    // 2026-08-28: the login card was only hidden, never cleared, so the
+    // staff member's real EspoCRM password sat in the page for the whole
+    // session - which contradicts espoClient.js's own statement that
+    // credentials live only in the main process. No route to reach it (the
+    // CSP blocks inline script, contextIsolation and sandbox are on), so
+    // this is defence in depth rather than a hole, but it is two lines.
+    const pwEl = document.getElementById('login-password');
+    if (pwEl) pwEl.value = '';
+    const codeEl = document.getElementById('login-code');
+    if (codeEl) codeEl.value = '';
     loginScreen.style.display = 'none';
     // The app shell's own CSS class (.app) sets `display:grid` for the
     // topbar-spans-full-width layout — must match that here, not the old
@@ -270,38 +293,83 @@ async function refreshMessagesBadge() {
   const badge = document.getElementById('messages-badge');
   if (!badge) return; // shell not built, or user has navigated away from it
 
+  // 2026-08-28, two separate faults in this one block:
+  //
+  //  1. It collapsed every message to the newest-per-case and then counted
+  //     CASES. Five messages from one client showed as "1" next to a speech
+  //     bubble that plainly reads as "you have N messages".
+  //  2. It had no owner filter at all, so with CPortalMessage read scoped to
+  //     the team, David's badge counted Maria's and Lucy's client messages
+  //     too and never matched anything he considered his.
+  //
+  // Tyrone's decision (2026-08-28): count messages, and scope the badge to
+  // the signed-in person's own cases.
+  const myCaseIds = await myOpenCaseIds();
+  if (myCaseIds === null) { showBadgeUnavailable(badge); return; }
+  if (myCaseIds.length === 0) { badge.style.display = 'none'; return; }
+
   const res = await window.rvr.espo.request('CPortalMessage', {
     query: {
       select: 'caseId,createdAt,direction',
       'where[0][type]': 'equals',
       'where[0][attribute]': 'direction',
       'where[0][value]': 'From Client',
+      'where[1][type]': 'in',
+      'where[1][attribute]': 'caseId',
+      'where[1][value][]': myCaseIds,
       orderBy: 'createdAt',
       order: 'desc',
       maxSize: 200
     }
   });
-  if (!res.ok) { badge.style.display = 'none'; return; }
+  // 2026-08-28: this used to hide the badge on ANY failure, which looks
+  // exactly like "no unread messages" and stayed that way for the whole
+  // session on a 2-minute poll. The comment above justified it by a
+  // CPortalMessage ACL gap that has been closed since 2026-08-17.
+  if (!res.ok) { showBadgeUnavailable(badge); return; }
 
   const seenMap = (await window.rvr.messages.getSeen()) || {};
-  const newestByCase = {};
-  ((res.data && res.data.list) || []).forEach((m) => {
-    if (!m.caseId) return;
-    if (!newestByCase[m.caseId] || new Date(m.createdAt) > new Date(newestByCase[m.caseId])) {
-      newestByCase[m.caseId] = m.createdAt;
-    }
-  });
-  const unreadCaseCount = Object.keys(newestByCase).filter((caseId) => {
-    const seenAt = seenMap[caseId];
-    return !seenAt || new Date(newestByCase[caseId]) > new Date(seenAt);
+  const unreadMessageCount = ((res.data && res.data.list) || []).filter((m) => {
+    if (!m.caseId) return false;
+    const seenAt = seenMap[m.caseId];
+    return !seenAt || new Date(m.createdAt) > new Date(seenAt);
   }).length;
 
-  if (unreadCaseCount > 0) {
-    badge.textContent = unreadCaseCount > 99 ? '99+' : String(unreadCaseCount);
+  badge.classList.remove('nav-badge-unknown');
+  badge.removeAttribute('title');
+  if (unreadMessageCount > 0) {
+    badge.textContent = unreadMessageCount > 99 ? '99+' : String(unreadMessageCount);
     badge.style.display = '';
   } else {
     badge.style.display = 'none';
   }
+}
+
+// The cases assigned to the signed-in staff member. Returns null - never an
+// empty array - when the read FAILED, so the caller can tell "you have no
+// cases" apart from "we could not find out".
+async function myOpenCaseIds() {
+  const myId = state.user && state.user.id;
+  if (!myId) return null;
+  const res = await window.rvr.espo.request('Case', {
+    query: {
+      select: 'id',
+      'where[0][type]': 'equals',
+      'where[0][attribute]': 'assignedUserId',
+      'where[0][value]': myId,
+      maxSize: 200
+    }
+  });
+  if (!res.ok) return null;
+  return ((res.data && res.data.list) || []).map((c) => c.id).filter(Boolean);
+}
+
+// A badge that cannot be calculated must not look like a badge of zero.
+function showBadgeUnavailable(badge) {
+  badge.textContent = '!';
+  badge.classList.add('nav-badge-unknown');
+  badge.title = 'Unread message count is unavailable right now.';
+  badge.style.display = '';
 }
 
 function startMessagesPolling() {
@@ -409,7 +477,38 @@ function reportModuleFailure(moduleId, container, seq, err) {
 // so the proximity check and Time Tracking Log behave identically either way.
 // ---------------------------------------------------------------------------
 let clockType = 'office';
+// 2026-08-28: this used to be set to [] on failure as well as on success,
+// and [] is truthy - so one failed lookup (patchy signal in a car park is
+// the obvious one) was cached for the rest of the session. The dropdown said
+// "No assigned cases with a saved site address" and kept saying it, telling a
+// surveyor standing at a site that they had no cases, with the only fix being
+// a restart that nothing on screen suggested. Only a SUCCESSFUL read is
+// cached now.
 let myCasesCache = null;
+
+// 2026-08-28: see preload's session.onExpired. Returns the user to the login
+// card once, cleanly, instead of stranding them on a dead screen.
+let sessionExpiryHandled = false;
+function wireSessionExpiry() {
+  if (!window.rvr.session || typeof window.rvr.session.onExpired !== 'function') return;
+  window.rvr.session.onExpired(() => {
+    if (sessionExpiryHandled) return;
+    sessionExpiryHandled = true;
+    const loginScreen = document.getElementById('login-screen');
+    const appShell = document.getElementById('app-shell');
+    if (!loginScreen || !appShell) return;
+    if (messagesPollTimer) { clearInterval(messagesPollTimer); messagesPollTimer = null; }
+    appShell.style.display = 'none';
+    loginScreen.style.display = '';
+    const banner = document.getElementById('login-status');
+    if (banner) {
+      banner.textContent = 'Your session has expired. Please sign in again.';
+      banner.className = 'status-banner show err';
+    }
+    state.user = null;
+    sessionExpiryHandled = false;
+  });
+}
 
 function renderClockWidget() {
   const el = document.getElementById('topbar-clock-widget');
@@ -446,7 +545,15 @@ async function loadMyCasesIntoSelect() {
 
   if (!myCasesCache) {
     const res = await window.rvr.clock.myCases(state.user.id);
-    myCasesCache = (res.ok && res.data && res.data.cases) || [];
+    if (!res.ok) {
+      // Do NOT cache a failure. This is the whole bug: [] is truthy, so one
+      // dropped connection meant the lookup was never retried and a surveyor
+      // standing at a site was told they had no cases for the rest of the
+      // session.
+      select.innerHTML = '<option value="">Could not load your cases - close this and try again</option>';
+      return;
+    }
+    myCasesCache = (res.data && res.data.cases) || [];
   }
 
   if (myCasesCache.length === 0) {
@@ -577,3 +684,6 @@ function wireFeedbackModal() {
 // Boot
 // ---------------------------------------------------------------------------
 renderLoginScreen();
+// Registered once, at boot, rather than per login - re-registering on every
+// sign-in would stack a listener each time.
+wireSessionExpiry();

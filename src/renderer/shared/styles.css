@@ -325,11 +325,22 @@ td.message-preview{ color:var(--muted); font-weight:400; }
 
 /* ---- Sidebar nav badge (Messages unread count) ---- */
 .nav-item{ position:relative; }
+/* 2026-08-28: this used to be var(--accent) - the RVR gold, the same colour
+   as the topbar underline, the avatar circle and the active nav item - so
+   against the navy sidebar it did not read as an alert at all. Tyrone asked
+   for red. --danger was already defined and unused here.
+   The old `.nav-item.active .nav-badge` rule additionally painted it
+   navy-on-navy while you were standing on the Messages screen, i.e. hid it
+   at the exact moment it mattered; it now keeps the red and just gains a
+   ring so it still reads against the active row. */
 .nav-badge{
-  margin-left:auto; background:var(--accent); color:#25314a; font-size:10.5px; font-weight:700;
+  margin-left:auto; background:var(--danger); color:#fff; font-size:10.5px; font-weight:700;
   border-radius:20px; padding:1px 7px; line-height:1.5;
 }
-.nav-item.active .nav-badge{ background:#25314a; color:var(--accent); }
+.nav-item.active .nav-badge{ background:var(--danger); color:#fff; box-shadow:0 0 0 1.5px rgba(255,255,255,.55); }
+/* "we could not work out the count" - deliberately not a number, and
+   deliberately not invisible. */
+.nav-badge.nav-badge-unknown{ background:var(--slate,#5B6B74); color:#fff; }
 
 /* ---- KPI cards that act as a link into another screen (Dashboard) ---- */
 .kpi-clickable{ cursor:pointer; }

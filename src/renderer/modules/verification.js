@@ -61,7 +61,12 @@
             'where[0][type]': 'in',
             'where[0][attribute]': 'id',
             'where[0][value][]': caseIds,
-            maxSize: caseIds.length
+            // 2026-08-28: this used to be caseIds.length, unbounded. EspoCRM
+            // refuses any maxSize over 200 with a bare 403, so once more than
+            // 200 cases had a document waiting the whole screen went blank.
+            // The document query above is itself capped at 200, so 200 here
+            // can never truncate the result.
+            maxSize: 200
           }
         })
       : { ok: true, data: { list: [] } };

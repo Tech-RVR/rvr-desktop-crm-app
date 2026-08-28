@@ -24,7 +24,10 @@
     `;
 
     const res = await window.rvr.espo.request('Case', {
-      query: { select: 'number,name,cCaseStage,contactName', maxSize: 200 }
+      // 2026-08-28: added an explicit ordering. Without one, EspoCRM's
+      // default decided which 200 cases survived the cap, so the board could
+      // quietly reshuffle between loads as well as under-count.
+      query: { select: 'number,name,cCaseStage,contactName', orderBy: 'createdAt', order: 'desc', maxSize: 200 }
     });
 
     const board = container.querySelector('#pipeline-board');

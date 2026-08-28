@@ -21,8 +21,17 @@
 // (shows the step) on missing/unrecognised ACL shapes, matching this app's
 // existing convention of degrading gracefully rather than guessing wrong.
 function rvrAclAllows(acl, scope, action) {
-  if (!acl || !acl[scope]) return true;
-  const value = acl[scope][action];
+  // 2026-08-28: this indexed the ACL object by scope name directly, but
+  // EspoCRM's GET App/user wraps the scope map - the top-level keys are
+  // `table`, `fieldTable`, `assignmentPermission`, `messagePermission` and
+  // so on, with the per-entity permissions under `table`. Confirmed against
+  // the live CRM. So acl['Case'] was always undefined, the function always
+  // returned true, and the three requiresAcl filters never filtered
+  // anything: a Trainee was shown "Start a brand new case from scratch" for
+  // a screen that will refuse them. It still fails open by design.
+  const table = (acl && (acl.table || acl)) || null;
+  if (!table || !table[scope]) return true;
+  const value = table[scope][action];
   if (value === undefined || value === null) return true;
   if (value === false || value === 'no') return false;
   return true;

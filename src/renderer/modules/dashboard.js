@@ -43,13 +43,38 @@
       // KPI cards below can be computed client-side from one request, the
       // same pattern used elsewhere in this app (e.g. cases.js's single list
       // query) rather than four separate round trips.
+      // 2026-08-28: this was ONE request capped at 200 with no paging, and
+      // the `total` EspoCRM returns was fetched and never read. Closed cases
+      // accumulate forever and are exactly what falls off the end, so the
+      // first visible symptom would have been "Annual Savings Secured"
+      // starting to go DOWN over time - the hardest kind of number to
+      // disbelieve. Page through instead. 200 is EspoCRM's hard ceiling per
+      // request; anything above it comes back as a bare 403.
+      async function loadAllCases() {
+        const PAGE = 200;
+        const MAX_PAGES = 25; // 5,000 cases - far beyond realistic volume
+        const all = [];
+        for (let page = 0; page < MAX_PAGES; page += 1) {
+          const pageRes = await window.rvr.espo.request('Case', {
+            query: {
+              select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving,assignedUserId,assignedUserName',
+              orderBy: 'createdAt',
+              order: 'desc',
+              maxSize: PAGE,
+              offset: page * PAGE
+            }
+          });
+          if (!pageRes.ok) return pageRes;
+          const list = (pageRes.data && pageRes.data.list) || [];
+          all.push(...list);
+          const total = pageRes.data && pageRes.data.total;
+          if (list.length < PAGE || (typeof total === 'number' && all.length >= total)) break;
+        }
+        return { ok: true, data: { list: all } };
+      }
+
       const [res, allDocsCount] = await Promise.all([
-        window.rvr.espo.request('Case', {
-          query: {
-            select: 'number,name,contactName,cCaseStage,cDocumentsReceived,cInvoicePaid,cPaymentDueDate,cAnnualSaving,assignedUserId,assignedUserName',
-            maxSize: 200
-          }
-        }),
+        loadAllCases(),
         loadAllDocsCount()
       ]);
 
@@ -77,11 +102,20 @@
         return docsReceived < allDocsCount && !isClosed(c);
       }).length;
 
-      const today = new Date();
+      // 2026-08-28: cPaymentDueDate is a DATE, not a datetime - EspoCRM
+      // returns "2026-08-27". `new Date()` on that yields midnight, which was
+      // then compared against the current MOMENT, so from just after midnight
+      // an invoice due TODAY was already counted overdue and shown in red.
+      // Against a two-day payment window, a whole day early is a third of it.
+      // Compare date strings: both are YYYY-MM-DD, so this is exact and has
+      // no timezone in it at all.
+      const pad = (n) => String(n).padStart(2, '0');
+      const now = new Date();
+      const todayIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
       const overdueInvoices = cases.filter((c) => {
         if (c.cInvoicePaid) return false;
         if (!c.cPaymentDueDate) return false;
-        return new Date(c.cPaymentDueDate) < today;
+        return String(c.cPaymentDueDate).slice(0, 10) < todayIso;
       }).length;
 
       // Count-only query (maxSize:1, read the `total` EspoCRM always returns
@@ -96,7 +130,13 @@
           maxSize: 1
         }
       });
-      const pendingVerificationCount = (pendingVerificationRes.ok && pendingVerificationRes.data && pendingVerificationRes.data.total) || 0;
+      // 2026-08-28: this used to collapse a FAILED read into 0, so a
+      // permission problem or a server error rendered as a confident amber
+      // zero saying "nothing waiting on you". null means "could not find
+      // out", and the card renders a dash instead of a number.
+      const pendingVerificationCount = pendingVerificationRes.ok
+        ? ((pendingVerificationRes.data && pendingVerificationRes.data.total) || 0)
+        : null;
 
       container.querySelector('#dash-kpis').innerHTML = `
         <div class="kpi">
@@ -121,8 +161,8 @@
         </div>
         <div class="kpi kpi-clickable" id="dash-kpi-verification">
           <div class="label">Pending Verification</div>
-          <div class="value" style="color:var(--warn)">${pendingVerificationCount}</div>
-          <div class="delta">uploaded documents awaiting review &rarr;</div>
+          <div class="value" style="color:var(--warn)">${pendingVerificationCount === null ? '&mdash;' : pendingVerificationCount}</div>
+          <div class="delta">${pendingVerificationCount === null ? 'count unavailable right now' : 'uploaded documents awaiting review &rarr;'}</div>
         </div>
       `;
 

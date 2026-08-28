@@ -84,6 +84,12 @@
   </div>
 </div>
 
+<!-- Vendored QR generator (qrcode-generator 2.0.4 by Kazuhiko Arase, MIT).
+     Kept as a local file on purpose: index.html's CSP is script-src 'self'
+     with no unsafe-inline, so a CDN cannot be used here. It defines a plain
+     `qrcode` global when loaded as a classic script, which is what
+     modules/security.js draws the two-factor QR code from. -->
+<script src="shared/vendor/qrcode.js"></script>
 <script src="shared/stage-badge.js"></script>
 <script src="modules/dashboard.js"></script>
 <script src="modules/claim-pool.js"></script>

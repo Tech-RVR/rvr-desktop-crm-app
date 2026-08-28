@@ -159,7 +159,7 @@
               <span class="doc-source-badge ${sourceBadgeClass(d.cSource)}">${d.cSource === 'Client Upload' ? 'Client' : 'Staff'}</span>
               ${ctx.escapeHtml(d.cCategory || d.name || 'Document')}
             </div>
-            <div class="doc-meta">Uploaded by ${ctx.escapeHtml(uploaderLabel(d))} &middot; ${formatDate(d.createdAt)}</div>
+            <div class="doc-meta">Uploaded by ${ctx.escapeHtml(uploaderLabel(d))} &middot; ${formatDateTime(d.createdAt)}</div>
           </div>
           <div class="doc-actions">
             <span class="pill ${reviewPillClass(d.cReviewStatus)}">${ctx.escapeHtml(d.cReviewStatus || 'Pending Review')}</span>
@@ -206,6 +206,41 @@
     }
     function clearStatus() {
       statusEl.className = 'status-banner';
+    }
+
+    // 2026-08-28. Two faults fixed in one place:
+    //   B8 - only the Verify path ticked the checklist, so staff uploads
+    //        (which arrive already verified) never did.
+    //   B9 - the tick wrote back the WHOLE list from a page-load snapshot,
+    //        so a colleague's tick made in the meantime was silently wiped.
+    //        Last save won, on the field that gates case progress.
+    // The current value is now re-read immediately before writing, and only
+    // the one new item is added to whatever is actually there.
+    async function tickDocumentsReceived(category) {
+      if (!category) return;
+      if (!Array.isArray(receivedOptions) || !receivedOptions.includes(category)) return;
+
+      const freshRes = await window.rvr.espo.request(`Case/${caseId}`, { query: { select: 'cDocumentsReceived' } });
+      if (!freshRes.ok) {
+        showStatus('Saved, but the Documents Received checklist could not be updated - it can be ticked in the CRM.', 'err');
+        return;
+      }
+      const live = Array.isArray(freshRes.data && freshRes.data.cDocumentsReceived)
+        ? freshRes.data.cDocumentsReceived
+        : [];
+      if (live.includes(category)) {
+        receivedNow = live;
+        if (typeof onDocumentsReceivedChanged === 'function') onDocumentsReceivedChanged(receivedNow);
+        return;
+      }
+      const nextReceived = live.concat([category]);
+      const caseRes = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: { cDocumentsReceived: nextReceived } });
+      if (!caseRes.ok) {
+        showStatus('Saved, but the Documents Received checklist could not be updated - it can be ticked in the CRM.', 'err');
+        return;
+      }
+      receivedNow = nextReceived;
+      if (typeof onDocumentsReceivedChanged === 'function') onDocumentsReceivedChanged(receivedNow);
     }
 
     async function loadDocuments() {
@@ -265,16 +300,7 @@
           // separately. If this document's category matches one of the
           // case's own Documents Received options and isn't already ticked,
           // tick it here, in the same action -- no separate manual step.
-          if (category && Array.isArray(receivedOptions) && receivedOptions.includes(category) && !receivedNow.includes(category)) {
-            const nextReceived = receivedNow.concat([category]);
-            const caseRes = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: { cDocumentsReceived: nextReceived } });
-            if (caseRes.ok) {
-              receivedNow = nextReceived;
-              if (typeof onDocumentsReceivedChanged === 'function') onDocumentsReceivedChanged(receivedNow);
-            } else {
-              showStatus('Document verified, but the Documents Received checklist could not be updated automatically -- tick it manually.', 'err');
-            }
-          }
+          await tickDocumentsReceived(category);
         });
       });
 
@@ -331,14 +357,26 @@
         });
         if (!attachRes.ok) { showStatus(attachRes.message || 'Could not upload the file.', 'err'); return; }
 
+        // 2026-08-28: this body was missing two required things, stacked, so
+        // fixing either one alone just moves the error.
+        //   1. `publishDate` is required on Document and EspoCRM refuses the
+        //      create without it (400). The portal proxy learned this on
+        //      2026-08-16; this path never did. Six failed uploads in the
+        //      server log on 2026-08-27 between 23:19 and 23:26.
+        //   2. No owner. Since assignmentPermission went to `team` on
+        //      2026-08-20, EspoCRM refuses any record carrying neither an
+        //      assigned user nor a team (403 "Assignment failure"), and the
+        //      team stamping formula runs too late to save it.
         const docBody = {
           name: file.name,
           fileId: attachRes.data.id,
           cCategory: categorySelect.value,
           cSource: 'Staff Upload',
           cReviewStatus: 'Verified',
-          cCaseId: caseId
+          cCaseId: caseId,
+          publishDate: todayIsoDate()
         };
+        if (ctx.user && ctx.user.id) docBody.assignedUserId = ctx.user.id;
         if (categorySelect.value === 'Other') docBody.cCategoryOtherSpecify = otherSpecify;
 
         const docRes = await window.rvr.espo.request('Document', {
@@ -346,6 +384,13 @@
           body: docBody
         });
         if (!docRes.ok) { showStatus(docRes.message || 'Could not save the document.', 'err'); return; }
+
+        // 2026-08-28: a staff upload is created already Verified, so the
+        // Verify button never appears for it and the auto-tick above never
+        // fired. Upload the rates bill yourself and the checklist stayed
+        // empty, which keeps the case blocked from moving past Evidence
+        // Gathering with nothing on screen explaining why. Tick it here too.
+        await tickDocumentsReceived(categorySelect.value);
 
         showStatus('Document uploaded.', 'ok');
         fileInput.value = '';
@@ -510,6 +555,26 @@
       bodyEl.innerHTML = renderCaseDetailsView(current);
     }
 
+    // 2026-08-28: `"Madonna".split(' ')` never reaches pop(), so the old
+    // inline version put the whole name in BOTH firstName and lastName and
+    // the contact read "Madonna Madonna" everywhere - the CRM, the portal,
+    // and any email that merges a client's name in. Not rare: a company name
+    // typed into the contact box does it too.
+    function splitPersonName(full) {
+      const parts = String(full || '').trim().split(/\s+/).filter(Boolean);
+      if (parts.length === 0) return { firstName: '', lastName: '' };
+      if (parts.length === 1) return { firstName: '', lastName: parts[0] };
+      const lastName = parts.pop();
+      return { firstName: parts.join(' '), lastName };
+    }
+
+    // EspoCRM wants a plain YYYY-MM-DD for its date-only fields.
+    function todayIsoDate() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+
     async function paintEdit() {
       editBtn.style.display = 'none';
       clearStatus();
@@ -523,11 +588,37 @@
         ? await window.rvr.espo.request(`Contact/${originalContactId}`)
         : null;
       if (ctx.isStale()) return;
+      // 2026-08-28: a FAILED read used to collapse to `null`, which is
+      // indistinguishable from "this case has no contact". The edit form then
+      // painted empty contact boxes, the picker fell back to "- No contact
+      // linked -", and saving sent contactId: null - quietly detaching the
+      // client from the case behind a green "Saved.". Fail closed: if we
+      // could not read who the client is, nobody gets to edit the case.
+      if (linkedContactRes && !linkedContactRes.ok) {
+        paintView();
+        showStatus(
+          "Could not load the client on this case, so it isn't safe to edit right now. Nothing has been changed. Please try again in a moment.",
+          'err'
+        );
+        return;
+      }
       const linkedContact = linkedContactRes && linkedContactRes.ok ? linkedContactRes.data : null;
       const linkedAccountRes = originalAccountId
         ? await window.rvr.espo.request(`Account/${originalAccountId}`)
         : null;
       if (ctx.isStale()) return;
+      // Same reasoning as the contact above. Here the silent version was
+      // milder but just as dishonest: the company boxes rendered blank, staff
+      // retyped the company name, and every company change was discarded
+      // while the screen still said "Saved.".
+      if (linkedAccountRes && !linkedAccountRes.ok) {
+        paintView();
+        showStatus(
+          "Could not load the company on this case, so it isn't safe to edit right now. Nothing has been changed. Please try again in a moment.",
+          'err'
+        );
+        return;
+      }
       const linkedAccount = linkedAccountRes && linkedAccountRes.ok ? linkedAccountRes.data : null;
 
       bodyEl.innerHTML = await renderCaseDetailsEditForm(current, reliefOptions, linkedContact, linkedAccount);
@@ -702,8 +793,13 @@
           cPropertyAddressState: bodyEl.querySelector('#edit-state').value.trim(),
           cPropertyAddressPostalCode: bodyEl.querySelector('#edit-postcode').value.trim()
         };
-        if (rvBeforeRaw) body.cRateableValueBefore = Number(rvBeforeRaw);
-        if (rvAfterRaw) body.cRateableValueAfter = Number(rvAfterRaw);
+        // 2026-08-28: these two used to send a value only when one was
+        // present, unlike every other field on this form. Emptying a figure
+        // entered on the wrong case did nothing at all, while the screen said
+        // "Saved." and then repainted showing the old number still there.
+        // An empty box now clears the field, as the user plainly intended.
+        body.cRateableValueBefore = rvBeforeRaw ? Number(rvBeforeRaw) : null;
+        body.cRateableValueAfter = rvAfterRaw ? Number(rvAfterRaw) : null;
         if (stageVal === 'Closed Without Payment - Disputed') body.cDisputeReason = disputeReasonsChecked;
 
         saveBtn.disabled = true;
@@ -770,9 +866,7 @@
 
           if (selectedContactId && selectedContactId === originalContactId) {
             if (linkedContact) {
-              const nameParts = contactNameVal.split(' ').filter(Boolean);
-              const lastName = nameParts.length > 1 ? nameParts.pop() : contactNameVal;
-              const firstName = nameParts.join(' ');
+              const { firstName, lastName } = splitPersonName(contactNameVal);
               const origName = `${linkedContact.firstName || ''} ${linkedContact.lastName || ''}`.trim();
               const contactBody = {};
               if (contactNameVal !== origName) {
@@ -791,9 +885,7 @@
           } else if (selectedContactId && selectedContactId !== originalContactId) {
             resolvedContactId = selectedContactId;
           } else if (!selectedContactId && contactNameVal) {
-            const nameParts = contactNameVal.split(' ').filter(Boolean);
-            const lastName = nameParts.length > 1 ? nameParts.pop() : contactNameVal;
-            const firstName = nameParts.join(' ');
+            const { firstName, lastName } = splitPersonName(contactNameVal);
             const contactBody = { lastName };
             // Same reason as the Account create above.
             if (ctx.user && ctx.user.id) contactBody.assignedUserId = ctx.user.id;
@@ -1021,7 +1113,7 @@
     }
     return notes.map((n) => `
       <div class="note-row">
-        <div class="note-meta"><strong>${ctx.escapeHtml(n.createdByName || 'Staff')}</strong> &middot; ${formatDate(n.createdAt)}</div>
+        <div class="note-meta"><strong>${ctx.escapeHtml(n.createdByName || 'Staff')}</strong> &middot; ${formatDateTime(n.createdAt)}</div>
         <div class="note-body">${ctx.escapeHtml(n.post || '')}</div>
       </div>
     `).join('');
@@ -1040,13 +1132,27 @@
 
     async function loadNotes() {
       listEl.innerHTML = '<div class="loading-state">Loading notes…</div>';
+      // 2026-08-28: this used to pull the 100 most recent ACTIVITY entries
+      // and then filter them down to human notes in the browser. The stream
+      // also records every stage change, field edit, reassignment and
+      // document verification - all of which this app generates freely - so
+      // on a busy case the real notes fell off the end and the panel said
+      // "No notes on this case yet." while the notes still existed.
+      // `filter=posts` makes EspoCRM do the filtering. Proven live against
+      // the running CRM: the same case returned total 2 unfiltered (Post +
+      // Create) and total 1 with the filter, Post only.
       const res = await window.rvr.espo.request(`Case/${caseId}/stream`, {
-        query: { maxSize: 100, orderBy: 'createdAt', order: 'desc' }
+        query: { maxSize: 200, orderBy: 'createdAt', order: 'desc', filter: 'posts' }
       });
       if (ctx.isStale()) return;
       if (!res.ok) {
         if (res.status === 403) {
-          listEl.innerHTML = '<div class="empty-state">Notes on this case aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
+          // 2026-08-28: this used to promise "we've received a report of
+          // this and are working on a fix" for a fault nobody had looked at.
+          // Reassuring copy that asserts an unverified diagnosis is
+          // camouflage - it is why the Messages fault hid for a week. Say
+          // what happened and that it has been reported; claim nothing else.
+          listEl.innerHTML = '<div class="empty-state">Notes could not be loaded. This has been reported to the team.</div>';
         } else {
           listEl.innerHTML = `<div class="empty-state">Could not load notes (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
         }
@@ -1109,7 +1215,7 @@
         <div class="message-bubble ${fromClient ? 'from-client' : 'to-client'}">
           <div class="message-meta">
             <strong>${ctx.escapeHtml(m.senderName || (fromClient ? 'Client' : 'Staff'))}</strong>
-            &middot; ${formatDate(m.createdAt)}
+            &middot; ${formatDateTime(m.createdAt)}
           </div>
           <div class="message-body">${ctx.escapeHtml(m.messageBody || '')}</div>
         </div>
@@ -1137,21 +1243,27 @@
           'where[0][type]': 'equals',
           'where[0][attribute]': 'caseId',
           'where[0][value]': caseId,
+          // 2026-08-28: this used to be order 'asc' with a hard cap, so past
+          // 200 messages the NEWEST were the ones silently dropped - exactly
+          // the wrong end of a conversation - and the "seen" marker below was
+          // then set from an old message, so that case's badge never cleared.
+          // Fetch newest-first and reverse for display.
           orderBy: 'createdAt',
-          order: 'asc',
+          order: 'desc',
           maxSize: 200
         }
       });
       if (ctx.isStale()) return;
       if (!res.ok) {
         if (res.status === 403) {
-          threadEl.innerHTML = '<div class="empty-state">Case messages aren\'t working right now — we\'ve received a report of this and are working on a fix.</div>';
+          // See the note on the Notes panel above - same reason.
+          threadEl.innerHTML = '<div class="empty-state">Messages could not be loaded. This has been reported to the team.</div>';
         } else {
           threadEl.innerHTML = `<div class="empty-state">Could not load messages (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
         }
         return;
       }
-      const messages = (res.data && res.data.list) || [];
+      const messages = ((res.data && res.data.list) || []).slice().reverse();
       threadEl.innerHTML = renderMessagesThread(messages, ctx);
       threadEl.scrollTop = threadEl.scrollHeight;
 
@@ -1173,15 +1285,23 @@
       sendBtn.textContent = 'Sending…';
       const senderName = (ctx.user && (`${ctx.user.firstName || ''} ${ctx.user.lastName || ''}`.trim() || ctx.user.userName)) || 'Staff';
 
+      // 2026-08-28: this create had no owner on it, so EspoCRM refused it
+      // outright - the same assignmentPermission trap that stopped David
+      // adding a company. v0.2.25 fixed that for Account and Contact and
+      // never came back for messages. Proven in the server log: 403
+      // "Assignment failure" on POST /CPortalMessage at 23:01 on 2026-08-27.
+      const messageBody = {
+        caseId,
+        contactId: c.contactId || null,
+        direction: 'To Client',
+        senderName,
+        messageBody: text
+      };
+      if (ctx.user && ctx.user.id) messageBody.assignedUserId = ctx.user.id;
+
       const res = await window.rvr.espo.request('CPortalMessage', {
         method: 'POST',
-        body: {
-          caseId,
-          contactId: c.contactId || null,
-          direction: 'To Client',
-          senderName,
-          messageBody: text
-        }
+        body: messageBody
       });
 
       if (ctx.isStale()) return;
@@ -1217,11 +1337,92 @@
       .filter(Boolean).join(', ') || '—';
   }
 
+  // The Director/Administrator role - the same id security.js gates its
+  // colleague password reset panel on.
+  const DIRECTOR_ADMIN_ROLE_ID = '6a6d2924bb6f8918c';
+
+  async function wireCaseDelete(container, caseId, c, ctx) {
+    const slot = container.querySelector('#case-detail-danger');
+    const status = container.querySelector('#case-detail-top-status');
+    if (!slot || !ctx.user || !ctx.user.id) return;
+
+    const rolesRes = await window.rvr.espo.request(`User/${ctx.user.id}`, { query: { select: 'rolesIds' } });
+    if (ctx.isStale()) return;
+    // Fail CLOSED: if we could not read the roles, do not show a destructive
+    // control on the strength of a guess.
+    if (!rolesRes.ok) return;
+    const rolesIds = (rolesRes.data && rolesRes.data.rolesIds) || [];
+    if (!rolesIds.includes(DIRECTOR_ADMIN_ROLE_ID)) return;
+
+    slot.innerHTML = '<button class="btn btn-danger" id="case-delete-btn">Delete case</button>';
+    const btn = slot.querySelector('#case-delete-btn');
+
+    btn.addEventListener('click', async () => {
+      const label = `Case #${c.number || ''}${c.name ? ` - ${c.name}` : ''}`.trim();
+      // Deliberately NOT promising this can be undone. EspoCRM does keep the
+      // record, but recovering it is a database job, not something anyone
+      // here can click - the document delete already oversells that and it
+      // should not be repeated on something this consequential.
+      const first = window.confirm(
+        `Delete ${label}?\n\nThis removes the case, and its documents and messages go with it. It cannot be undone from inside this app.`
+      );
+      if (!first) return;
+      const typed = window.prompt(`To confirm, type the case number (${c.number || ''}) below.`);
+      if (typed === null) return;
+      if (String(typed).trim() !== String(c.number || '').trim()) {
+        status.textContent = 'Case number did not match - nothing has been deleted.';
+        status.className = 'status-banner show err';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Deleting…';
+      const del = await window.rvr.espo.request(`Case/${caseId}`, { method: 'DELETE' });
+      if (ctx.isStale()) return;
+
+      if (!del.ok) {
+        btn.disabled = false;
+        btn.textContent = 'Delete case';
+        status.textContent = del.message || 'Could not delete this case.';
+        status.className = 'status-banner show err';
+        return;
+      }
+      ctx.goBack();
+    });
+  }
+
   function formatDate(value) {
     if (!value) return '—';
     const d = new Date(value);
     if (Number.isNaN(d.getTime())) return String(value);
     return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  }
+
+  // 2026-08-28: Tyrone asked for the time messages were sent. Everything with
+  // a real timestamp on it - messages, notes, document uploads - used
+  // formatDate, which prints day/month/year and nothing else, so a thread of
+  // replies sent across one afternoon showed the same date against every
+  // bubble and read as having no timestamp at all.
+  //
+  // EspoCRM hands these back as "2026-08-27 14:03:11" - UTC, space-separated,
+  // no zone marker - which JavaScript would otherwise read as local time.
+  // The Z is added explicitly so it is parsed as what it actually is.
+  // NOTE: this renders in the viewer's local timezone. Once the estate moves
+  // to Europe/London (see claude/OPEN-move-everything-to-uk-time.md) this
+  // should be pinned to that zone rather than left to the machine.
+  function formatDateTime(value) {
+    if (!value) return '—';
+    const raw = String(value);
+    const iso = /[Z+]|\dT\d/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return raw;
+    const now = new Date();
+    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const sameDay = d.getFullYear() === now.getFullYear()
+      && d.getMonth() === now.getMonth()
+      && d.getDate() === now.getDate();
+    if (sameDay) return `Today, ${time}`;
+    return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${time}`;
   }
 
   // Full pipeline stage-track — every stage as a pill, grey if upcoming,
@@ -1252,7 +1453,11 @@
     }
 
     container.innerHTML = `
-      <a class="back-link" id="case-detail-back">&larr; Back</a>
+      <div class="case-detail-topbar" style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+        <a class="back-link" id="case-detail-back">&larr; Back</a>
+        <div id="case-detail-danger"></div>
+      </div>
+      <div class="status-banner" id="case-detail-top-status"></div>
       <div id="case-detail-body"><div class="loading-state">Loading case…</div></div>
     `;
     container.querySelector('#case-detail-back').addEventListener('click', () => ctx.goBack());
@@ -1267,6 +1472,13 @@
     }
 
     const c = res.data || {};
+    // 2026-08-28: Tyrone asked for a way for David to delete a case. Director
+    // /Administrator only, which is his decision - and it needs no permission
+    // change, because that role already holds delete on Case. Every other
+    // role does not, so for them the button is both hidden here AND refused
+    // by EspoCRM if they ever reached it; the gating below is a convenience,
+    // not the security boundary.
+    wireCaseDelete(container, caseId, c, ctx);
     const documentsReceived = Array.isArray(c.cDocumentsReceived) ? c.cDocumentsReceived : [];
     const docOptions = await loadDocumentOptions();
     if (ctx.isStale()) return;

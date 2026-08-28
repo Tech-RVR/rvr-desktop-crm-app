@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, session, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, session, dialog, screen } = require('electron');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const Store = require('electron-store');
@@ -109,6 +109,30 @@ function reportUnexpectedApiFailure(err, userAction) {
 
   if (seen && now - seen.firstReportedAt < ERROR_REPORT_WINDOW_MS) {
     seen.suppressed += 1;
+    // 2026-08-28: the comment below promises repeats are "folded into a
+    // single follow-up report when the window closes, so nothing is silently
+    // dropped". Nothing ever closed the window - the count was only ever
+    // reported on the NEXT occurrence after the window elapsed. So an error
+    // that fired 40 times in half an hour and then stopped, which is exactly
+    // what a passing outage looks like, was reported once and the other 39
+    // were lost. Schedule the flush when the window actually expires.
+    if (!seen.flushTimer) {
+      seen.flushTimer = setTimeout(() => {
+        const entry = recentErrorReports.get(key);
+        if (!entry) return;
+        entry.flushTimer = null;
+        if (entry.suppressed > 0) {
+          reportError({
+            errorMessage: `${errorMessage} [and ${entry.suppressed} further identical occurrence(s) in the ${Math.round(ERROR_REPORT_WINDOW_MS / 60000)} minutes after the first report]`,
+            stackTrace,
+            userAction
+          });
+          entry.suppressed = 0;
+        }
+        recentErrorReports.delete(key);
+      }, Math.max(0, ERROR_REPORT_WINDOW_MS - (now - seen.firstReportedAt)));
+      if (seen.flushTimer.unref) seen.flushTimer.unref();
+    }
     return;
   }
 
@@ -142,8 +166,34 @@ process.on('unhandledRejection', (reason) => {
   reportError({ errorMessage: err.message, stackTrace: err.stack, userAction: 'Background (main process unhandled rejection)' });
 });
 
+// 2026-08-28: the saved position was restored with no check that those
+// coordinates are still on a connected display. Resize while docked to a
+// second monitor, undock, and the app opens off-screen - which looks exactly
+// like it failing to start. Electron does not clamp this for you.
+function usableBounds(saved) {
+  const fallback = { width: 1280, height: 820 };
+  if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') return fallback;
+  const size = { width: saved.width, height: saved.height };
+  if (typeof saved.x !== 'number' || typeof saved.y !== 'number') return size;
+  try {
+    const displays = screen.getAllDisplays();
+    const visible = displays.some((d) => {
+      const a = d.workArea;
+      // At least a decent strip of the title bar has to land on a real screen.
+      return saved.x + saved.width > a.x + 80
+        && saved.x < a.x + a.width - 80
+        && saved.y + 40 > a.y
+        && saved.y < a.y + a.height - 40;
+    });
+    if (!visible) return size;
+  } catch (_) {
+    return size;
+  }
+  return Object.assign({}, size, { x: saved.x, y: saved.y });
+}
+
 function createWindow() {
-  const bounds = store.get('windowBounds') || { width: 1280, height: 820 };
+  const bounds = usableBounds(store.get('windowBounds'));
 
   mainWindow = new BrowserWindow({
     ...bounds,
@@ -161,9 +211,23 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
-  mainWindow.on('resize', () => {
-    if (mainWindow) store.set('windowBounds', mainWindow.getBounds());
-  });
+  // 2026-08-28: this fired on EVERY frame of a drag, and electron-store's
+  // set() is a synchronous atomic file write - hundreds of writes and fsyncs
+  // per resize, on the main process thread, which is a visibly janky drag on
+  // a modest office laptop. Debounced, and `move` is captured too so the
+  // position is not only ever saved as a side effect of resizing.
+  let saveBoundsTimer = null;
+  const rememberBounds = () => {
+    clearTimeout(saveBoundsTimer);
+    saveBoundsTimer = setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        store.set('windowBounds', mainWindow.getBounds());
+      }
+    }, 500);
+    if (saveBoundsTimer.unref) saveBoundsTimer.unref();
+  };
+  mainWindow.on('resize', rememberBounds);
+  mainWindow.on('move', rememberBounds);
 
   // Open any external links (e.g. "www.rvrratingpartners.co.uk" footer link)
   // in the OS default browser rather than inside the app window.
@@ -191,9 +255,17 @@ const UPDATE_REMIND_LATER_MS = 60 * 60 * 1000;     // re-ask an hour after "Late
 
 let updatePromptOpen = false;
 let updateRemindTimer = null;
+// 2026-08-28: electron-updater re-emits `update-downloaded` on every
+// subsequent check once the file is cached, so the half-hourly poll reopened
+// this dialog and cleared the one-hour reminder it had just set - a modal
+// stealing focus mid-case every 30 minutes, the exact opposite of the intent
+// stated below. Remember what the user said "Later" to, and stay quiet about
+// that version until the reminder genuinely fires.
+let updateDismissedVersion = null;
 
-function promptToInstallUpdate(version) {
+function promptToInstallUpdate(version, fromReminder) {
   if (updatePromptOpen) return;
+  if (!fromReminder && updateDismissedVersion && updateDismissedVersion === version) return;
   updatePromptOpen = true;
   clearTimeout(updateRemindTimer);
 
@@ -224,7 +296,12 @@ function promptToInstallUpdate(version) {
       // "Later" — the update is already downloaded and autoInstallOnAppQuit
       // stays on, so quitting normally still applies it. Ask again in an hour
       // in case they leave the app open for days.
-      updateRemindTimer = setTimeout(() => promptToInstallUpdate(version), UPDATE_REMIND_LATER_MS);
+      updateDismissedVersion = version;
+      updateRemindTimer = setTimeout(() => {
+        updateDismissedVersion = null;
+        promptToInstallUpdate(version, true);
+      }, UPDATE_REMIND_LATER_MS);
+      if (updateRemindTimer.unref) updateRemindTimer.unref();
     })
     .catch(() => { updatePromptOpen = false; });
 }
@@ -232,7 +309,11 @@ function promptToInstallUpdate(version) {
 function initAutoUpdate() {
   // Never check in dev — it would try to read a release feed for a version
   // that doesn't exist and log noise on every run.
-  if (process.env.NODE_ENV && process.env.NODE_ENV !== 'production') return;
+  // 2026-08-28: this only guarded `npm run dev`. `npm start` leaves
+  // NODE_ENV unset, so auto-update ran in development, failed on "application
+  // is not packaged", and the failure was swallowed by the handler below.
+  // app.isPackaged is the reliable test.
+  if (!app.isPackaged) return;
 
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
@@ -241,7 +322,16 @@ function initAutoUpdate() {
 
   // Non-fatal by design: no network, GitHub briefly unreachable, or a rate
   // limit should never interrupt someone mid-case. The next timer tick retries.
-  autoUpdater.on('error', () => {});
+  //
+  // 2026-08-28: it used to be `() => {}` - the one failure path in this whole
+  // app that reported nothing at all. If the update feed ever broke (a
+  // renamed account, a bad token, a repo gone private) staff would quietly
+  // stop receiving new versions and nobody would find out. Still silent for
+  // the user; no longer silent for us. The 30-minute de-duplication above
+  // stops a persistent outage flooding the inbox.
+  autoUpdater.on('error', (err) => {
+    reportUnexpectedApiFailure(err, 'Checking for an app update');
+  });
 
   const check = () => { autoUpdater.checkForUpdates().catch(() => {}); };
   check();
@@ -317,6 +407,11 @@ function staffFacingMessage(err, status) {
   // ones already aimed at whoever is using the app, so let them through.
   if (err instanceof EspoAuthError && err.expected) return err.message;
 
+  // 2026-08-28: status 0 means the request never got an answer at all - a
+  // timeout or an unreachable host. It is still reported to tech@ like any
+  // other unexplained failure, but the staff member gets a plain sentence
+  // they can actually act on rather than silence.
+  if (status === 0) return 'Could not reach the CRM - check your connection and try again.';
   if (status === 401) return 'Your session has expired. Please log in again.';
   if (status === 403) return "This isn't working right now — a report has been sent to the team and we're working on a fix.";
   if (status === 404) return 'That record could not be found — it may have been deleted.';
@@ -331,6 +426,14 @@ ipcMain.handle('espo:request', async (_event, { path: reqPath, method, query, bo
     return { ok: true, data };
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
+
+    // 2026-08-28: espoClient.logout() has already run by this point on a 401,
+    // so the app is signed out whether the renderer knows it or not. Tell it,
+    // so it can put the login card back rather than leaving someone reading
+    // "please log in again" on a screen with nothing to log in with.
+    if (status === 401 && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('session:expired');
+    }
 
     // `expected403` lets a caller say "a 403 here is a normal outcome, don't
     // report it" — the password screen being the case that matters, where a
@@ -358,7 +461,11 @@ ipcMain.handle('espo:downloadFile', async (_event, { fileId, fileName }) => {
   } catch (err) {
     const status = err instanceof EspoAuthError ? err.status : undefined;
     reportUnexpectedApiFailure(err, `Downloading file ${fileId}`);
-    return { ok: false, message: err.message, status };
+    // 2026-08-28: this returned EspoCRM's own developer wording straight to
+    // the renderer, bypassing the translation layer added in v0.2.25 - the
+    // exact thing that release set out to prevent. Sanitise it like every
+    // other call does.
+    return { ok: false, message: staffFacingMessage(err, status), status };
   }
 });
 

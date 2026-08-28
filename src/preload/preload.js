@@ -44,6 +44,17 @@ contextBridge.exposeInMainWorld('rvr', {
     // is just a convenience so non-admins never see the control.
     resetColleaguePassword: (targetUserId) => ipcRenderer.invoke('security:resetColleaguePassword', { targetUserId })
   },
+  session: {
+    // 2026-08-28: on a 401 the main process cleared the stored credentials
+    // and never told the renderer, so every screen said "your session has
+    // expired, please log in again" while offering no way to do so - the
+    // only route back was the sidebar Log out button, which none of those
+    // messages mentioned. Main now emits this and app.js returns the user to
+    // the login card.
+    onExpired: (callback) => {
+      ipcRenderer.on('session:expired', () => { try { callback(); } catch (_) { /* never let a listener break the bridge */ } });
+    }
+  },
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getOsLabel: () => ipcRenderer.invoke('app:getOsLabel'),

@@ -153,7 +153,7 @@
           orderBy: 'dateStart',
           order: 'asc',
           maxSize: limit,
-          select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus,cAcceptanceStatus'
+          select: 'id,name,dateStart,dateEnd,assignedUserId,assignedUserName,cLocation,parentId,parentType,parentName,status,acceptanceStatus,cAcceptanceStatus,usersIds'
         }
       });
       if (res && res.ok && res.data && Array.isArray(res.data.list)) return res.data.list;
@@ -193,9 +193,22 @@
   // better to force a conscious rebook than risk a silent double-booking.
   function conflictFor(surveyorId, slotStart, slotEnd, dayMeetings, excludeMeetingId) {
     return dayMeetings.find((m) => (
-      m.assignedUserId === surveyorId &&
+      // 2026-08-28: this only ever matched the ASSIGNED user, so a visit
+      // created in the EspoCRM web UI or by an automation with the surveyor
+      // as an attendee - assigned to whoever booked it - was invisible here
+      // and the surveyor was shown as free. Bookings made through this screen
+      // set both, so this is belt and braces for anything created elsewhere.
+      // `usersIds` is now in the select at loadMeetingsFrom; if EspoCRM ever
+      // stops returning it, this degrades to exactly the old behaviour.
+      (m.assignedUserId === surveyorId
+        || (Array.isArray(m.usersIds) && m.usersIds.indexOf(surveyorId) !== -1)) &&
       m.id !== excludeMeetingId &&
       m.cAcceptanceStatus !== 'Declined' &&
+      // 2026-08-28: `status` was fetched and then never read, so an abandoned
+      // or cancelled visit blocked that surveyor's slot for ever with the
+      // tooltip "Already booked", forcing a pointless rebook - and still drew
+      // a dot on the month grid as though it were live.
+      m.status !== 'Not Held' &&
       rangesOverlap(minutesOfDay(slotStart), minutesOfDay(slotEnd), meetingMinuteRange(m).start, meetingMinuteRange(m).end)
     )) || null;
   }
@@ -315,6 +328,47 @@
       statusEl.className = `status-banner show ${kind}`;
     }
 
+    // 2026-08-28: showStatus writes into #cal-status, which lives inside
+    // #cal-form-panel (display:none) inside #cal-day-modal (a hidden
+    // backdrop). So the careful fail-closed messages this screen produces had
+    // nowhere visible to go: a month that failed to load painted a completely
+    // empty grid, offered "3 surveyors available" on every slot, and only
+    // told anyone at the final Book click. This puts the same message
+    // somewhere a person can actually see it.
+    function showMonthBanner(msg) {
+      let b = container.querySelector('#cal-month-banner');
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'cal-month-banner';
+        daysEl.parentNode.insertBefore(b, daysEl);
+      }
+      b.className = 'status-banner show err';
+      b.textContent = msg;
+    }
+
+    function clearMonthBanner() {
+      const b = container.querySelector('#cal-month-banner');
+      if (b) b.remove();
+    }
+
+    // Used where a failure can happen with the day pop-up open - the message
+    // goes to every place the user might be looking.
+    function showAnywhere(msg) {
+      showStatus(msg, 'err');
+      showMonthBanner(msg);
+      const openModal = container.querySelector('#cal-day-modal.show');
+      if (openModal && modalEventsEl) {
+        let mb = container.querySelector('#cal-modal-banner');
+        if (!mb) {
+          mb = document.createElement('div');
+          mb.id = 'cal-modal-banner';
+          modalEventsEl.parentNode.insertBefore(mb, modalEventsEl);
+        }
+        mb.className = 'status-banner show err';
+        mb.textContent = msg;
+      }
+    }
+
     function dayMeetingsFor(dateStr) {
       return state.monthMeetings.filter((m) => dateOf(m.dateStart) === dateStr);
     }
@@ -367,9 +421,7 @@
     }
 
     async function ensureMonthLoaded(year, month) {
-      const monthStartStr = `${dateStrOf(year, month, 1)} 00:00:00`;
       const nextMonth = month === 11 ? { y: year + 1, m: 0 } : { y: year, m: month + 1 };
-      const nextMonthStartStr = `${dateStrOf(nextMonth.y, nextMonth.m, 1)} 00:00:00`;
       // EspoCRM's API hard-caps maxSize at 200 per request (recordListMaxSizeLimit,
       // default Espo\Core\Record\SearchParamsFetcher::MAX_SIZE_LIMIT) and returns a
       // bare 403 for anything over that, regardless of how many records actually
@@ -377,14 +429,28 @@
       // fell back to an empty list (see loadMeetingsFrom's catch). 200 is the
       // most a single request can ask for; if a month ever has more meetings than
       // that, this will need real pagination (offset) rather than a bigger number.
-      const fetched = await loadMeetingsFrom(monthStartStr, 200);
+      // 2026-08-28: the grid draws the tail of the previous month and the
+      // head of the next as grey lead-in / lead-out days, but the data was
+      // trimmed to this month exactly - so those days ALWAYS looked free,
+      // whether or not anything was booked. This is a calendar people scan
+      // rather than click, so an at-a-glance read of "1-3 September are
+      // clear" was simply wrong. Fetch a week either side and keep it.
+      const windowStart = new Date(Date.UTC(year, month, 1));
+      windowStart.setUTCDate(windowStart.getUTCDate() - 7);
+      const pad = (n) => String(n).padStart(2, '0');
+      const windowStartStr = `${windowStart.getUTCFullYear()}-${pad(windowStart.getUTCMonth() + 1)}-${pad(windowStart.getUTCDate())} 00:00:00`;
+      const windowEnd = new Date(Date.UTC(nextMonth.y, nextMonth.m, 1));
+      windowEnd.setUTCDate(windowEnd.getUTCDate() + 7);
+      const windowEndStr = `${windowEnd.getUTCFullYear()}-${pad(windowEnd.getUTCMonth() + 1)}-${pad(windowEnd.getUTCDate())} 00:00:00`;
+
+      const fetched = await loadMeetingsFrom(windowStartStr, 200);
       if (fetched === null) {
         state.monthLoadFailed = true;
         state.monthMeetings = [];
         return;
       }
       state.monthLoadFailed = false;
-      state.monthMeetings = fetched.filter((m) => m.dateStart < nextMonthStartStr);
+      state.monthMeetings = fetched.filter((m) => m.dateStart < windowEndStr);
     }
 
     async function loadMonth(year, month) {
@@ -395,7 +461,11 @@
       if (ctx.isStale()) return;
       renderMonthGrid();
       if (state.monthLoadFailed) {
-        showStatus('Could not load this month\u2019s appointments, so the calendar below is not showing existing bookings. New bookings are blocked until it loads, to avoid double-booking a surveyor. Try switching month, or reopening the Calendar.', 'err');
+        const msg = 'Could not load this month\u2019s appointments, so the calendar below is NOT showing existing bookings \u2014 an empty day here does not mean the day is free. New bookings are blocked until it loads, to avoid double-booking a surveyor. Try switching month, or reopening the Calendar.';
+        showStatus(msg, 'err');
+        showMonthBanner(msg);
+      } else {
+        clearMonthBanner();
       }
     }
 
@@ -442,7 +512,16 @@
         renderMonthGrid();
         openDate(state.selectedDate, { keepForm: true });
         refreshUpcoming();
+        return;
       }
+      // 2026-08-28: there was no else branch at all. A refused update - which
+      // is what a surveyor gets on a colleague's appointment, since Meeting
+      // edit is scoped to their own - produced absolutely nothing on screen,
+      // so they clicked Accept, saw it still say Pending, and clicked again.
+      showAnywhere(
+        (res && res.message)
+          || 'That response could not be saved. If this is a colleague\u2019s appointment, only the surveyor it is assigned to can accept or decline it.'
+      );
     }
 
     function wireEventRows(scopeEl) {
@@ -458,6 +537,19 @@
     }
 
     function renderSlotOptions(dateStr) {
+      // 2026-08-28: renderLegend and renderSurveyorChips both honour
+      // surveyorsLoadFailed and say honestly that availability could not be
+      // read. This one did not - with no surveyors loaded, every slot from
+      // 09:00 to 17:00 rendered "- fully booked" and disabled, so staff
+      // concluded there was no capacity that day and could not even reach the
+      // message that would have told them otherwise, because it only appears
+      // once a slot is picked and no slot could be picked.
+      if (state.surveyors.length === 0) {
+        slotSelect.innerHTML = state.surveyorsLoadFailed
+          ? '<option value="">Surveyor availability could not be loaded \u2014 booking is unavailable</option>'
+          : '<option value="">No surveyors found</option>';
+        return;
+      }
       const dayMeetings = dayMeetingsFor(dateStr);
       const slots = buildSlots();
       slotSelect.innerHTML = '<option value="">Select a time slot…</option>' + slots.map((s) => {

@@ -52,7 +52,14 @@
   async function fetchCases(term) {
     const query = {
       select: 'number,name,cCaseStage,contactName,cPropertyAddressStreet,cPropertyAddressCity,cReliefType,cRateableValueBefore,cRateableValueAfter,cAnnualSaving,createdAt,assignedUserId,assignedUserName',
-      maxSize: 50,
+      // 2026-08-28: this used to be 50, and the two panel headings printed
+      // "My Cases (n)" / "Team Cases (n)" as though they were real counts -
+      // when they were only the split of whichever 50 cases happened to be
+      // newest. For David, who sees the whole firm's work, that number could
+      // be badly wrong and one of his own live cases simply absent. 200 is
+      // EspoCRM's per-request ceiling; the footnote below now reports the
+      // true total so a truncated list says so instead of lying quietly.
+      maxSize: 200,
       orderBy: 'createdAt',
       order: 'desc'
     };
@@ -122,13 +129,21 @@
       }
 
       const cases = (res.data && res.data.list) || [];
+      // The true number matching, which may be larger than what came back.
+      const totalMatching = (res.data && typeof res.data.total === 'number') ? res.data.total : cases.length;
+      const truncated = totalMatching > cases.length;
       const myId = ctx.user && ctx.user.id;
       const mine = cases.filter((c) => c.assignedUserId === myId);
       const team = cases.filter((c) => c.assignedUserId !== myId);
       const searching = !!term.trim();
 
-      container.querySelector('#cases-mine-heading').textContent = `My Cases (${mine.length})`;
-      container.querySelector('#cases-team-heading').textContent = `Team Cases (${team.length})`;
+      // 2026-08-28: these counts are of what is ON SCREEN. While the list is
+      // truncated they are not the whole picture, so say so rather than
+      // printing a number that reads as authoritative and is not.
+      container.querySelector('#cases-mine-heading').textContent =
+        truncated ? `My Cases (${mine.length} shown)` : `My Cases (${mine.length})`;
+      container.querySelector('#cases-team-heading').textContent =
+        truncated ? `Team Cases (${team.length} shown)` : `Team Cases (${team.length})`;
 
       mineListEl.innerHTML = renderTable(mine, ctx, {
         emptyText: searching ? 'No matching cases assigned to you.' : 'No cases assigned to you yet.'
@@ -144,9 +159,11 @@
         const note = document.createElement('p');
         note.id = 'cases-list-note';
         note.style.cssText = 'color:var(--muted); font-size:12px; margin-top:4px;';
-        note.textContent = searching
-          ? `Showing up to 50 matching cases, split by who they're assigned to. Click a row to open it.`
-          : 'Showing the 50 most recent cases visible to you, split by who they’re assigned to. Click a row to open it.';
+        note.textContent = truncated
+          ? `Showing the ${cases.length} most recent of ${totalMatching} cases. Search to narrow it down. Click a row to open it.`
+          : (searching
+            ? `Showing all ${cases.length} matching cases, split by who they're assigned to. Click a row to open it.`
+            : `Showing all ${cases.length} cases visible to you, split by who they're assigned to. Click a row to open it.`);
         teamListEl.after(note);
       }
 

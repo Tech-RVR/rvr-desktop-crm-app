@@ -1,8 +1,6 @@
 'use strict';
 
 (function () {
-  let isClaiming = false;
-
   function formatDate(iso, escapeHtml) {
     if (!iso) return '';
     const d = new Date(iso.replace(' ', 'T') + (iso.indexOf('Z') === -1 && iso.indexOf('+') === -1 ? 'Z' : ''));
@@ -11,12 +9,18 @@
   }
 
   async function render(container, ctx) {
+    // 2026-08-28: this flag used to sit at module scope, so it outlived the
+    // screen. One failed claim left it stuck true and every Claim button
+    // disabled reading "Claiming..." for the rest of the session - navigating
+    // away and back did not clear it, because render() never reset it.
+    let isClaiming = false;
+
     container.innerHTML = `
       <h1 class="module-title">Claim a Case</h1>
       <p class="module-subtitle">Unclaimed cases — new incoming and existing unassigned. Claim one to start work; the office is notified automatically.</p>
       <div class="status-banner" id="claim-status"></div>
       <div class="panel" style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="color:var(--slate); font-size:13px;">Signed in as <strong>${ctx.escapeHtml(`${ctx.user.firstName || ''} ${ctx.user.lastName || ''}`.trim() || ctx.user.userName)}</strong></span>
+        <span style="color:var(--slate); font-size:13px;">Signed in as <strong>${ctx.escapeHtml((ctx.user && (`${ctx.user.firstName || ''} ${ctx.user.lastName || ''}`.trim() || ctx.user.userName)) || 'you')}</strong></span>
         <button class="btn btn-secondary" id="claim-refresh">Refresh list</button>
       </div>
       <div id="claim-case-list"><div class="loading-state">Loading unclaimed cases…</div></div>
@@ -76,9 +80,17 @@
       clearStatus();
       container.querySelectorAll('.btn-claim').forEach((b) => { b.disabled = true; b.textContent = 'Claiming…'; });
 
-      const res = await window.rvr.claimPool.submit(caseId, ctx.user.id);
-
-      isClaiming = false;
+      let res;
+      try {
+        res = await window.rvr.claimPool.submit(caseId, ctx.user.id);
+      } catch (err) {
+        // Belt and braces. n8nClient no longer rejects, but if anything else
+        // in the bridge throws, this screen must still come back to life
+        // rather than freezing every button on it.
+        res = { ok: false, data: null };
+      } finally {
+        isClaiming = false;
+      }
 
       if (res.ok && res.data && res.data.success) {
         showStatus(`You've claimed Case #${caseNumber} — the office has been notified.`, 'ok');

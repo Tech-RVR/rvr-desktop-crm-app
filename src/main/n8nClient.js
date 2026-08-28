@@ -16,12 +16,49 @@
 
 const N8N_BASE = 'https://n8n.rvrratingpartners.co.uk/webhook';
 
+// 2026-08-28: these calls had no time limit and no error handling, so a
+// dropped connection or a restarting n8n rejected the promise all the way
+// back into the calling screen. On Claim a Case that left every button
+// disabled reading "Claiming..." until the app was restarted, with nothing
+// on screen to say why. Nothing in here rejects any more - a failure comes
+// back as { ok: false } like every other outcome, which is what the screens
+// already know how to handle.
+const N8N_TIMEOUT_MS = 20000;
+
+function n8nTimeoutSignal() {
+  try {
+    if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+      return AbortSignal.timeout(N8N_TIMEOUT_MS);
+    }
+  } catch (_) { /* older runtime - no timeout, same as before */ }
+  return undefined;
+}
+
+function unreachable(err) {
+  const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+  return {
+    ok: false,
+    status: 0,
+    data: {
+      message: timedOut
+        ? 'That did not respond in time. Please try again.'
+        : 'Could not reach the server. Check your connection and try again.'
+    }
+  };
+}
+
 async function postJson(path, body, extraHeaders) {
-  const res = await fetch(`${N8N_BASE}/${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
-    body: JSON.stringify(body || {})
-  });
+  let res;
+  try {
+    res = await fetch(`${N8N_BASE}/${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
+      body: JSON.stringify(body || {}),
+      signal: n8nTimeoutSignal()
+    });
+  } catch (err) {
+    return unreachable(err);
+  }
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (_) { /* non-JSON response */ }
@@ -34,7 +71,12 @@ async function getJson(path, query) {
     const params = new URLSearchParams(query);
     url += `?${params.toString()}`;
   }
-  const res = await fetch(url);
+  let res;
+  try {
+    res = await fetch(url, { signal: n8nTimeoutSignal() });
+  } catch (err) {
+    return unreachable(err);
+  }
   const text = await res.text();
   let data = null;
   try { data = text ? JSON.parse(text) : null; } catch (_) { /* non-JSON response */ }
