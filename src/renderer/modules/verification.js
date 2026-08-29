@@ -12,9 +12,10 @@
 (function () {
   function formatWhen(value) {
     if (!value) return '—';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    // 2026-08-29: the CRM stores UTC and hands it over unmarked, so this
+    // parsed it as local time and could show the wrong day either side of
+    // midnight. Goes through the one shared converter now.
+    return window.rvrTime.formatDate(value);
   }
 
   async function render(container, ctx) {

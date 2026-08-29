@@ -16,11 +16,10 @@
   // could not see it. Every staff upload threw "todayIsoDate is not defined"
   // before anything was saved, which is the fault v0.2.26 was meant to fix.
   // Kept at module level so both callers share one definition.
-  function todayIsoDate() {
-    const d = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  }
+  // 2026-08-29: today in BRITAIN. It used to take the date from whatever
+  // timezone the machine was set to, so a document uploaded late in the
+  // evening from a machine set to UTC got filed under the wrong day.
+  function todayIsoDate() { return window.rvrTime.todayDateStr(); }
 
   // What EspoCRM's Document.file field will actually accept. Read live from
   // GET /api/v1/Metadata on 2026-08-28 (entityDefs.Document.fields.file.accept)
@@ -1431,12 +1430,11 @@
     });
   }
 
-  function formatDate(value) {
-    if (!value) return '—';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
-  }
+  // 2026-08-29: was `new Date(value)`, which reads the CRM's unmarked
+  // "2026-08-27 14:03:11" as local time. Used for created dates, invoice
+  // dates and payment due dates, any of which could show the wrong day
+  // either side of midnight. One shared converter now.
+  function formatDate(value) { return window.rvrTime.formatDate(value); }
 
   // 2026-08-28: Tyrone asked for the time messages were sent. Everything with
   // a real timestamp on it - messages, notes, document uploads - used
@@ -1447,22 +1445,17 @@
   // EspoCRM hands these back as "2026-08-27 14:03:11" - UTC, space-separated,
   // no zone marker - which JavaScript would otherwise read as local time.
   // The Z is added explicitly so it is parsed as what it actually is.
-  // NOTE: this renders in the viewer's local timezone. Once the estate moves
-  // to Europe/London (see claude/OPEN-move-everything-to-uk-time.md) this
-  // should be pinned to that zone rather than left to the machine.
+  // 2026-08-29: that NOTE is now done. This used to render in whatever
+  // timezone the machine was set to - and Tyrone's own machine was set to
+  // UTC, which is exactly how a whole-estate hour offset stays invisible to
+  // the person testing it. It is pinned to Europe/London.
   function formatDateTime(value) {
     if (!value) return '—';
-    const raw = String(value);
-    const iso = /[Z+]|\dT\d/.test(raw) ? raw : raw.replace(' ', 'T') + 'Z';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return raw;
-    const now = new Date();
-    const time = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const sameDay = d.getFullYear() === now.getFullYear()
-      && d.getMonth() === now.getMonth()
-      && d.getDate() === now.getDate();
-    if (sameDay) return `Today, ${time}`;
-    return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${time}`;
+    const d = window.rvrTime.parseCrm(value);
+    if (!d) return String(value);
+    const time = window.rvrTime.formatTime(d);
+    if (window.rvrTime.isToday(d)) return `Today, ${time}`;
+    return `${window.rvrTime.formatDate(d)}, ${time}`;
   }
 
   // Full pipeline stage-track — every stage as a pill, grey if upcoming,

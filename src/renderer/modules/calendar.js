@@ -27,19 +27,21 @@
 
   function pad(n) { return String(n).padStart(2, '0'); }
 
-  function todayDateStr() {
-    const d = new Date();
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  }
+  // 2026-08-29: today in BRITAIN, not in whatever timezone the machine is set
+  // to. Tyrone's own machine was set to UTC, which is exactly how this kind of
+  // fault stays invisible to the person testing it.
+  function todayDateStr() { return window.rvrTime.todayDateStr(); }
 
   function dateStrOf(year, month, day) { return `${year}-${pad(month + 1)}-${pad(day)}`; }
 
-  // Meeting datetimes come back as "YYYY-MM-DD HH:MM:SS" (see loadMeetingsFrom
-  // below) — fixed-width and zero-padded, so slicing is safe and avoids any
-  // timezone ambiguity that constructing Date objects from these strings
-  // would introduce.
-  function dateOf(dtStr) { return (dtStr || '').slice(0, 10); }
-  function timeOf(dtStr) { return (dtStr || '').slice(11, 16); }
+  // Meeting datetimes come back as "YYYY-MM-DD HH:MM:SS" with no timezone
+  // marker on the end, and EspoCRM stores them as UTC.
+  // 2026-08-29: these used to slice the raw string, which showed whatever the
+  // CRM had stored. The CRM stores UTC, so through British Summer Time every
+  // appointment on this screen read an hour early, and one stored late in the
+  // evening showed on the wrong day entirely. They now convert properly.
+  function dateOf(dtStr) { return window.rvrTime.dateOf(dtStr); }
+  function timeOf(dtStr) { return window.rvrTime.timeOf(dtStr); }
   function minutesOfDay(hhmm) {
     const parts = String(hhmm || '0:0').split(':');
     return (Number(parts[0]) || 0) * 60 + (Number(parts[1]) || 0);
@@ -479,13 +481,18 @@
       // whether or not anything was booked. This is a calendar people scan
       // rather than click, so an at-a-glance read of "1-3 September are
       // clear" was simply wrong. Fetch a week either side and keep it.
+      // 2026-08-29: both bounds are now BRITISH midnight, converted to the UTC
+      // the CRM actually stores and compares against. Built the same way so the
+      // start bound (which is sent to the CRM) and the end bound (which is only
+      // compared here) can never disagree by an hour.
+      const pad = (n) => String(n).padStart(2, '0');
+      const dayStr = (dt) => `${dt.getUTCFullYear()}-${pad(dt.getUTCMonth() + 1)}-${pad(dt.getUTCDate())}`;
       const windowStart = new Date(Date.UTC(year, month, 1));
       windowStart.setUTCDate(windowStart.getUTCDate() - 7);
-      const pad = (n) => String(n).padStart(2, '0');
-      const windowStartStr = `${windowStart.getUTCFullYear()}-${pad(windowStart.getUTCMonth() + 1)}-${pad(windowStart.getUTCDate())} 00:00:00`;
+      const windowStartStr = window.rvrTime.crmDayStart(dayStr(windowStart));
       const windowEnd = new Date(Date.UTC(nextMonth.y, nextMonth.m, 1));
       windowEnd.setUTCDate(windowEnd.getUTCDate() + 7);
-      const windowEndStr = `${windowEnd.getUTCFullYear()}-${pad(windowEnd.getUTCMonth() + 1)}-${pad(windowEnd.getUTCDate())} 00:00:00`;
+      const windowEndStr = window.rvrTime.crmDayStart(dayStr(windowEnd));
 
       // 1000 = five full pages. Far more than a real month of site visits,
       // and a hard stop so a runaway data set can never spin here.
@@ -727,7 +734,8 @@
 
     async function refreshUpcoming() {
       upcomingEl.innerHTML = '<div class="loading-state">Loading…</div>';
-      const fetched = await loadMeetingsFrom(`${todayDateStr()} 00:00:00`, 200);
+      // British midnight today, expressed the way the CRM stores it.
+      const fetched = await loadMeetingsFrom(window.rvrTime.crmDayStart(todayDateStr()), 200);
       if (ctx.isStale()) return;
       // Cancelled visits are not upcoming appointments. They stay visible in
       // the day pop-up, marked cancelled, but nobody is attending them.
@@ -746,7 +754,7 @@
           <tbody>
             ${meetings.map((m) => `
               <tr class="clickable-row" data-date="${dateOf(m.dateStart)}">
-                <td>${ctx.escapeHtml(new Date(`${dateOf(m.dateStart)}T00:00:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }))}</td>
+                <td>${ctx.escapeHtml(window.rvrTime.formatDate(dateOf(m.dateStart)))}</td>
                 <td>${ctx.escapeHtml(formatTimeRange(timeOf(m.dateStart), timeOf(m.dateEnd)))}</td>
                 <td>
                   <span class="chip-avatar chip-avatar-sm" style="background:${surveyorColor(m.assignedUserId)}">${ctx.escapeHtml(initialsOf(m.assignedUserName))}</span>
@@ -841,8 +849,21 @@
         resolvedCase = found;
       }
 
-      const dateStart = `${dateStr} ${start}:00`;
-      const dateEnd = `${dateStr} ${end}:00`;
+      // 2026-08-29: THE SHARP EDGE OF THE WHOLE TIMEZONE MOVE.
+      // This used to send the digits the user picked straight through, so a
+      // 9am booking was stored as 9am UTC. Once the CRM is on Europe/London
+      // that same record reads as 10am in the CRM and in the client's
+      // confirmation email - a surveyor sent to a site an hour after the
+      // client is expecting them. The picked time is a BRITISH wall clock;
+      // it is converted to the instant it actually is before being stored.
+      const dateStart = window.rvrTime.crmStampFromUk(dateStr, start);
+      const dateEnd = window.rvrTime.crmStampFromUk(dateStr, end);
+      if (!dateStart || !dateEnd) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Book appointment';
+        showStatus('Not booked — that date and time could not be read. Please pick the slot again.', 'err');
+        return;
+      }
       const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
       const body = {

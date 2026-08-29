@@ -91,6 +91,9 @@
      modules/security.js draws the two-factor QR code from. -->
 <script src="shared/vendor/qrcode.js"></script>
 <script src="shared/stage-badge.js"></script>
+<!-- Must load BEFORE every module: they all read times through window.rvrTime.
+     The CRM stores UTC and this is the only place the app converts. -->
+<script src="shared/uk-time.js"></script>
 <script src="modules/dashboard.js"></script>
 <script src="modules/claim-pool.js"></script>
 <script src="modules/cases.js"></script>

@@ -28,13 +28,15 @@
 (function () {
   function formatWhen(value) {
     if (!value) return '—';
-    const d = new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    const now = new Date();
-    const sameDay = d.toDateString() === now.toDateString();
-    return sameDay
-      ? d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-      : d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+    // 2026-08-29: this parsed the CRM's "2026-08-28 09:00:00" as LOCAL time,
+    // which is wrong twice over - the CRM stores UTC, and the reader is in
+    // Britain. Through British Summer Time every message time read an hour
+    // early, and one sent late in the evening showed under the wrong day.
+    const d = window.rvrTime.parseCrm(value);
+    if (!d) return String(value);
+    return window.rvrTime.isToday(d)
+      ? window.rvrTime.formatTime(d)
+      : window.rvrTime.formatDate(d, { day: '2-digit', month: 'short', year: undefined });
   }
 
   // One stable colour per person, worked out from their user id, so the same

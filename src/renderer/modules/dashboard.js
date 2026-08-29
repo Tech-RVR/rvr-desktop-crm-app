@@ -109,9 +109,10 @@
       // Against a two-day payment window, a whole day early is a third of it.
       // Compare date strings: both are YYYY-MM-DD, so this is exact and has
       // no timezone in it at all.
-      const pad = (n) => String(n).padStart(2, '0');
-      const now = new Date();
-      const todayIso = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      // 2026-08-29: "today" now means today in BRITAIN, not in whatever
+      // timezone the machine happens to be set to. On a machine set to UTC,
+      // late on a summer evening, this thought it was still yesterday.
+      const todayIso = window.rvrTime.todayDateStr();
       const overdueInvoices = cases.filter((c) => {
         if (c.cInvoicePaid) return false;
         if (!c.cPaymentDueDate) return false;

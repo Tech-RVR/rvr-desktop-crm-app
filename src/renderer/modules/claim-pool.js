@@ -3,9 +3,10 @@
 (function () {
   function formatDate(iso, escapeHtml) {
     if (!iso) return '';
-    const d = new Date(iso.replace(' ', 'T') + (iso.indexOf('Z') === -1 && iso.indexOf('+') === -1 ? 'Z' : ''));
-    if (isNaN(d.getTime())) return escapeHtml(iso);
-    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+    // 2026-08-29: this already treated the CRM value as UTC, but then printed
+    // it in the machine's timezone. Pinned to Europe/London like everywhere
+    // else, through the one shared converter.
+    return escapeHtml(window.rvrTime.formatDate(iso, { day: 'numeric' }));
   }
 
   async function render(container, ctx) {
