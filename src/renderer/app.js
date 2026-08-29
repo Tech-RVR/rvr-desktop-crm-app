@@ -187,7 +187,10 @@ async function renderLoginScreen() {
     // this is defence in depth rather than a hole, but it is two lines.
     const pwEl = document.getElementById('login-password');
     if (pwEl) pwEl.value = '';
-    const codeEl = document.getElementById('login-code');
+    // Reuses the outer codeEl/passwordEl bindings from the top of this
+    // function - redeclaring `const codeEl` here would shadow the outer one
+    // for doLogin's whole body (TDZ), throwing "Cannot access 'codeEl'
+    // before initialization" the moment doLogin runs, well before this line.
     if (codeEl) codeEl.value = '';
     loginScreen.style.display = 'none';
     // The app shell's own CSS class (.app) sets `display:grid` for the
