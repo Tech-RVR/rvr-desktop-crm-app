@@ -187,8 +187,12 @@ async function renderLoginScreen() {
     // this is defence in depth rather than a hole, but it is two lines.
     const pwEl = document.getElementById('login-password');
     if (pwEl) pwEl.value = '';
-    const codeEl = document.getElementById('login-code');
-    if (codeEl) codeEl.value = '';
+    // Reuses the codeEl already declared above (not re-queried) - a second
+    // `const codeEl` here previously shadowed it for the whole function,
+    // putting every earlier use of codeEl (including doLogin's own
+    // `codeEl.value.trim()`) in the temporal dead zone and throwing
+    // "Cannot access 'codeEl' before initialization" on every sign-in click.
+    codeEl.value = '';
     loginScreen.style.display = 'none';
     // The app shell's own CSS class (.app) sets `display:grid` for the
     // topbar-spans-full-width layout — must match that here, not the old
