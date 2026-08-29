@@ -469,18 +469,35 @@ ipcMain.handle('espo:downloadFile', async (_event, { fileId, fileName }) => {
   }
 });
 
+// 2026-08-29: all three of these called n8n with no Authorization header.
+// The n8n side has verified the caller's EspoCRM session since 16 August, so
+// the claim pool had quietly been refusing everyone, and My Cases was handing
+// case numbers and property addresses to anyone who knew the address. They now
+// pass the signed-in person's own session header, exactly like the password
+// reset below, and refuse locally if there isn't one rather than making a call
+// that cannot succeed.
+function notSignedIn(message) {
+  return { ok: false, status: 401, data: { success: false, message } };
+}
+
 ipcMain.handle('claimPool:list', async () => {
-  const res = await n8nClient.listClaimableCases();
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) return notSignedIn('Please sign in to view the case list.');
+  const res = await n8nClient.listClaimableCases(authHeader);
   return res;
 });
 
 ipcMain.handle('claimPool:submit', async (_event, { caseId, staffUserId }) => {
-  const res = await n8nClient.submitClaim(caseId, staffUserId);
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) return notSignedIn('Please sign in to claim a case.');
+  const res = await n8nClient.submitClaim(authHeader, caseId, staffUserId);
   return res;
 });
 
-ipcMain.handle('clock:myCases', async (_event, { staffUserId }) => {
-  const res = await n8nClient.listMyCases(staffUserId);
+ipcMain.handle('clock:myCases', async () => {
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) return notSignedIn('Please sign in to see your cases.');
+  const res = await n8nClient.listMyCases(authHeader);
   return res;
 });
 

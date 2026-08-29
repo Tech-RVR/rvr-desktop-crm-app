@@ -864,7 +864,18 @@
         showStatus('Not booked — that date and time could not be read. Please pick the slot again.', 'err');
         return;
       }
-      const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      // 2026-08-29: this used to be Math.random() + Date.now(), which is
+      // guessable and, worse, not a fixed length - Math.random() can return a
+      // short base-36 string, and the automation that checks the link refuses
+      // anything under 16 characters. The automation now makes its own link
+      // when one is missing or too short, so this is belt and braces, but it
+      // should still produce a proper one: 32 hex characters from the
+      // browser's cryptographic random source.
+      const tokenBytes = new Uint8Array(16);
+      crypto.getRandomValues(tokenBytes);
+      const token = Array.from(tokenBytes)
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('');
 
       const body = {
         name: `Site Visit — ${location}`,

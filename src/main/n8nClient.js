@@ -65,7 +65,7 @@ async function postJson(path, body, extraHeaders) {
   return { ok: res.ok, status: res.status, data };
 }
 
-async function getJson(path, query) {
+async function getJson(path, query, extraHeaders) {
   let url = `${N8N_BASE}/${path}`;
   if (query && Object.keys(query).length) {
     const params = new URLSearchParams(query);
@@ -73,7 +73,10 @@ async function getJson(path, query) {
   }
   let res;
   try {
-    res = await fetch(url, { signal: n8nTimeoutSignal() });
+    res = await fetch(url, {
+      headers: { ...(extraHeaders || {}) },
+      signal: n8nTimeoutSignal()
+    });
   } catch (err) {
     return unreachable(err);
   }
@@ -84,14 +87,26 @@ async function getJson(path, query) {
 }
 
 const n8nClient = {
-  // Case Claim Pool
-  listClaimableCases: () => getJson('rvr-case-claim-list'),
-  submitClaim: (caseId, staffUserId) => postJson('rvr-case-claim-submit', { caseId, staffUserId }),
+  // Case Claim Pool.
+  // 2026-08-29: these three carried no Authorization header, but the n8n side
+  // has checked the caller's EspoCRM session since 16 August, so Claim a Case
+  // had been answering "Please sign in to view the case list." to everyone.
+  // Proven live on 29 Aug: a header-less call to rvr-case-claim-list came back
+  // with exactly that message. Nobody had hit it because the system is not in
+  // real use yet. They now send the signed-in person's own session header, and
+  // the n8n side answers with that verified person's cases - the staffUserId
+  // travelling in the URL or body is no longer trusted for anything.
+  listClaimableCases: (authHeader) => getJson('rvr-case-claim-list', null, { Authorization: authHeader }),
+  submitClaim: (authHeader, caseId, staffUserId) => postJson(
+    'rvr-case-claim-submit',
+    { caseId, staffUserId },
+    { Authorization: authHeader }
+  ),
 
   // A staff member's own assigned cases with a saved site address (used for
   // the field clock-in case picker, both here and on the standalone
   // field-clock.html mobile page).
-  listMyCases: (staffUserId) => getJson('rvr-my-cases', { staffUserId }),
+  listMyCases: (authHeader) => getJson('rvr-my-cases', null, { Authorization: authHeader }),
 
   // Clock In/Out — returns { status, staffName, action, notes, withinRange,
   // distanceMetres, siteAddress } as of the 2026-08-12 payload extension.
