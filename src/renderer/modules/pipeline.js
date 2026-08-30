@@ -23,22 +23,32 @@
       <div id="pipeline-board"><div class="loading-state">Loading…</div></div>
     `;
 
-    const res = await window.rvr.espo.request('Case', {
-      // 2026-08-28: added an explicit ordering. Without one, EspoCRM's
-      // default decided which 200 cases survived the cap, so the board could
-      // quietly reshuffle between loads as well as under-count.
-      query: { select: 'number,name,cCaseStage,contactName', orderBy: 'createdAt', order: 'desc', maxSize: 200 }
+    // 2026-08-28: added an explicit ordering. Without one, EspoCRM's default
+    // decided which 200 cases survived the cap, so the board could quietly
+    // reshuffle between loads as well as under-count.
+    // 2026-08-30: it no longer stops at 200 either — it pages. A board that
+    // silently omits the 201st case is worse than one that says it is short.
+    const read = await window.rvrPagedRead.readAll('Case', {
+      select: 'number,name,cCaseStage,contactName',
+      orderBy: 'createdAt',
+      order: 'desc'
     });
 
     const board = container.querySelector('#pipeline-board');
     if (!board) return;
 
-    if (!res.ok) {
-      board.innerHTML = `<div class="empty-state">Could not load the pipeline (${ctx.escapeHtml(res.message || 'unknown error')}).</div>`;
+    if (read === null) {
+      board.innerHTML = '<div class="empty-state">Could not load the pipeline. This is a problem reading the cases, not an empty board — please try again.</div>';
       return;
     }
 
-    const cases = (res.data && res.data.list) || [];
+    const cases = read.list;
+    if (read.truncated) {
+      const warn = document.createElement('p');
+      warn.className = 'module-subtitle';
+      warn.textContent = 'There are more cases than this board can read in one go. The most recent are shown.';
+      board.parentNode.insertBefore(warn, board);
+    }
     const byStage = {};
     cases.forEach((c) => {
       const stage = c.cCaseStage || '(no stage set)';

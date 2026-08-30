@@ -24,6 +24,7 @@
         <span style="color:var(--slate); font-size:13px;">Signed in as <strong>${ctx.escapeHtml((ctx.user && (`${ctx.user.firstName || ''} ${ctx.user.lastName || ''}`.trim() || ctx.user.userName)) || 'you')}</strong></span>
         <button class="btn btn-secondary" id="claim-refresh">Refresh list</button>
       </div>
+      <div id="claim-pool-note" style="margin:0 0 10px;color:var(--slate);font-size:13px;"></div>
       <div id="claim-case-list"><div class="loading-state">Loading unclaimed cases…</div></div>
     `;
 
@@ -47,6 +48,23 @@
       }
 
       const cases = (res.data && res.data.cases) || [];
+
+      // 2026-08-30: the endpoint has reported total / returned / truncated
+      // since 29 Aug and nothing here showed any of it, so a pool bigger than
+      // one page looked like the whole pool. It reads oldest-first, so what is
+      // hidden is always the newest — nothing overdue is ever missing.
+      const total = typeof (res.data && res.data.total) === 'number' ? res.data.total : null;
+      const isShort = (res.data && res.data.truncated === true)
+        || (total !== null && total > cases.length);
+      const poolNote = container.querySelector('#claim-pool-note');
+      if (poolNote) {
+        poolNote.textContent = isShort
+          ? 'Showing the ' + cases.length + ' oldest unclaimed cases'
+            + (total !== null ? ' of ' + total : '')
+            + '. The oldest are shown first, so nothing overdue is hidden.'
+          : '';
+      }
+
       if (cases.length === 0) {
         listEl.innerHTML = '<div class="empty-state">No unclaimed cases right now — nice and clear.</div>';
         return;

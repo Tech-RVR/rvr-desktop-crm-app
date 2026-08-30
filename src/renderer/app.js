@@ -14,6 +14,7 @@ const MODULES = [
   { id: 'case-new', label: 'New Case', icon: '\u{2795}' },
   { id: 'pipeline', label: 'Pipeline', icon: '\u{1F9ED}' },
   { id: 'calendar', label: 'Calendar', icon: '\u{1F4C5}' },
+  { id: 'bookings', label: 'Bookings', icon: '\u{1F4CB}' },
   { id: 'contacts', label: 'Contacts', icon: '\u{1F464}' },
   { id: 'messages', label: 'Messages', icon: '\u{1F4AC}', badgeId: 'messages-badge' },
   { id: 'verification', label: 'Verification', icon: '\u{2705}' },

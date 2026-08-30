@@ -274,6 +274,18 @@
 
       submitBtn.disabled = true;
       submitBtn.textContent = 'Creating…';
+      // 2026-08-30: the CRM now REQUIRES a contact on a Case. Before that,
+      // leaving this blank quietly created a case with no client attached;
+      // now it comes back as a bare validation failure that means nothing to
+      // the person looking at it. Ask properly, here, before anything is sent.
+      if (!contactSelect.value
+          && !newCompanyEl.value.trim()
+          && !newContactNameEl.value.trim()) {
+        showStatus('Please choose the client contact, or fill in the new contact boxes below, before creating the case.', 'err');
+        contactSelect.focus();
+        return;
+      }
+
       showStatus('Creating the case…', 'info');
 
       const body = {
