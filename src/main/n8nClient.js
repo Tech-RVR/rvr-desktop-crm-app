@@ -110,14 +110,35 @@ const n8nClient = {
 
   // Clock In/Out — returns { status, staffName, action, notes, withinRange,
   // distanceMetres, siteAddress } as of the 2026-08-12 payload extension.
-  clockEvent: (payload) => postJson('rvr-clock-in-out', payload),
+  // 2026-08-30: this used to send no Authorization header. That was fine while
+  // the endpoint accepted anything, and broke the moment it stopped: the
+  // webhook now re-checks the caller's own EspoCRM login and takes the staff
+  // member's name and id from the verified user, so a header-less post is
+  // refused outright. Exactly the same fault the claim pool had on 29 August -
+  // the n8n side gained a check and the app was never walked to match it.
+  // If a login is ever added to another of these webhooks, walk EVERY caller.
+  clockEvent: (authHeader, payload) => postJson(
+    'rvr-clock-in-out',
+    payload,
+    { Authorization: authHeader }
+  ),
 
   // Background error capture — fire-and-forget from the app's own error
   // handlers (main + renderer process). No AI/LLM involvement by design.
   reportError: (payload) => postJson('rvr-app-error-tracking', payload),
 
   // In-app Feedback button (Bug / Feature Request / Something else).
-  submitFeedback: (payload) => postJson('rvr-app-feedback', payload),
+  // 2026-08-30: now sends the signed-in person's own EspoCRM header, and the
+  // webhook verifies it. A shared secret baked into a shipped desktop app is
+  // not a secret - anyone holding the installer can read it out - whereas the
+  // app already has a real logged-in identity to offer, and the n8n side can
+  // check it against the CRM. The staff name in the payload is kept for the
+  // record but the workflow takes the real one from the verified user.
+  submitFeedback: (authHeader, payload) => postJson(
+    'rvr-app-feedback',
+    payload,
+    { Authorization: authHeader }
+  ),
 
   // Reset a colleague's password (Security screen, Director/Administrator
   // role only — see security.js). The requesting staff member's own EspoCRM

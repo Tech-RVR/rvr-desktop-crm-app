@@ -640,13 +640,22 @@ async function submitClock(action) {
 
   submitBtns.forEach((btn) => { btn.disabled = false; });
 
-  if (!res.ok) {
-    statusEl.textContent = 'Could not log the clock event. Please try again.';
+  const data = res.data || {};
+
+  // 2026-08-30: this used to say "Clocked in successfully" on any reply that
+  // arrived, because it only looked at the HTTP status. The clock endpoint now
+  // checks the caller's login and turns an unrecognised one away with HTTP 200
+  // and success:false - so a refused clock event would have read as a recorded
+  // one, which is the worst possible outcome for a timesheet. Only a reply
+  // that says status:'logged' counts. The same fix went onto the field clock
+  // web page the same evening; keep the two in step.
+  if (!res.ok || data.success === false || data.status !== 'logged') {
+    statusEl.textContent = data.message
+      || 'Could not log the clock event. Please try again.';
     statusEl.className = 'status-banner show err';
     return;
   }
 
-  const data = res.data || {};
   statusEl.textContent = `Clocked ${action} successfully.${data.notes ? ` — ${data.notes}` : ''}`;
   statusEl.className = 'status-banner show ok';
 
@@ -680,13 +689,21 @@ function wireFeedbackModal() {
     const staffName = `${state.user.firstName || ''} ${state.user.lastName || ''}`.trim() || state.user.userName;
     const res = await window.rvr.feedback.submit({ type, message, staffName });
 
-    if (res.ok) {
+    // 2026-08-30: same treatment as the clock screen. The feedback endpoint now
+    // checks the caller's login, and a refusal comes back as HTTP 200 with
+    // success:false - so accepting any reply would have told a staff member
+    // their bug report had been sent when it had gone nowhere. Only a reply
+    // that says status:'logged' counts, and the box is cleared only then, so
+    // nobody loses what they typed.
+    const data = res.data || {};
+    if (res.ok && data.success !== false && data.status === 'logged') {
       statusEl.textContent = 'Thanks — your feedback has been sent.';
       statusEl.className = 'status-banner show ok';
       document.getElementById('feedback-message').value = '';
       setTimeout(() => backdrop.classList.remove('show'), 1200);
     } else {
-      statusEl.textContent = 'Could not send feedback right now. Please try again.';
+      statusEl.textContent = data.message
+        || 'Could not send feedback right now. Please try again — your message has been kept.';
       statusEl.className = 'status-banner show err';
     }
   });

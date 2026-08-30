@@ -502,7 +502,13 @@ ipcMain.handle('clock:myCases', async () => {
 });
 
 ipcMain.handle('clock:event', async (_event, payload) => {
-  const res = await n8nClient.clockEvent(payload);
+  // 2026-08-30: the clock in/out webhook now verifies the caller's own
+  // EspoCRM login, so this has to send it. Refusing here rather than letting
+  // the post go out unsigned means the person is told to sign in, instead of
+  // getting the webhook's own refusal wording back through the clock screen.
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) return notSignedIn('Please sign in before clocking in or out.');
+  const res = await n8nClient.clockEvent(authHeader, payload);
   return res;
 });
 
@@ -516,7 +522,12 @@ ipcMain.handle('security:resetColleaguePassword', async (_event, { targetUserId 
 });
 
 ipcMain.handle('feedback:submit', async (_event, payload) => {
-  const res = await n8nClient.submitFeedback({
+  // 2026-08-30: feedback now goes out with the signed-in person's own EspoCRM
+  // header so the webhook can verify who is really sending it. It was the last
+  // endpoint in the estate that accepted anything from anyone.
+  const authHeader = espo.getAuthHeader();
+  if (!authHeader) return notSignedIn('Please sign in before sending feedback.');
+  const res = await n8nClient.submitFeedback(authHeader, {
     ...payload,
     staffName: payload.staffName || currentStaffName(),
     timestamp: new Date().toISOString()
