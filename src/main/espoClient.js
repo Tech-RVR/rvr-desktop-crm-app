@@ -389,6 +389,23 @@ class EspoClient {
         message = reasonHeader.trim();
       }
 
+      // 2026-09-01: a 409 is EspoCRM's own duplicate-detection refusing to
+      // create a record that matches one already on file (e.g. a Contact
+      // with the same email) - reported live via New Case, where the
+      // X-Status-Reason header comes back as the bare word "duplicate". That
+      // is EspoCRM correctly doing its job, not a bug: it was falling
+      // through to the generic path below, which (a) showed staff
+      // "Something went wrong" instead of something they could act on, and
+      // (b) fired a false-alarm report to tech@ for a routine, expected
+      // outcome. Treat it as expected and give it a sentence of its own.
+      if (res.status === 409) {
+        throw new EspoAuthError(
+          'A matching record already exists in the CRM. Search for it before creating a new one.',
+          409,
+          true
+        );
+      }
+
       try {
         const errBody = await res.json();
         if (errBody && errBody.message) {
