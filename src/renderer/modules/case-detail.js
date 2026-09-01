@@ -1630,9 +1630,9 @@
     if (ctx.isStale()) return;
 
     body.innerHTML = `
-      <h1 class="module-title">Case #${ctx.escapeHtml(c.number)}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</h1>
+      <h1 class="module-title">${ctx.escapeHtml(c.cClientRef || ('Case #' + c.number))}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</h1>
       <p class="module-subtitle">
-        ${ctx.escapeHtml(formatAddress(c))}
+        ${c.cClientRef ? `Case #${ctx.escapeHtml(c.number)} · ` : ''}${ctx.escapeHtml(formatAddress(c))}
         <span class="${window.rvrStageBadgeClass(c.cCaseStage)}" style="margin-left:8px;">${ctx.escapeHtml(c.cCaseStage || 'No stage set')}</span>
       </p>
       <div class="stage-track">${renderStageTrack(c)}</div>

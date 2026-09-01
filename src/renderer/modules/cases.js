@@ -27,7 +27,7 @@
         <tbody>
           ${cases.map((c) => `
             <tr class="clickable-row${notMine ? ' team-case-row' : ''}" data-case-id="${ctx.escapeHtml(c.id)}">
-              <td><b>#${ctx.escapeHtml(c.number)}</b>${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</td>
+              <td><b>${ctx.escapeHtml(c.cClientRef || ('#' + c.number))}</b>${c.cClientRef ? ` <small>#${ctx.escapeHtml(c.number)}</small>` : ''}${c.name ? ` — ${ctx.escapeHtml(c.name)}` : ''}</td>
               <td>${ctx.escapeHtml(c.contactName || '—')}</td>
               <td>${ctx.escapeHtml([c.cPropertyAddressStreet, c.cPropertyAddressCity].filter(Boolean).join(', ') || '—')}</td>
               <td><span class="${window.rvrStageBadgeClass(c.cCaseStage)}">${ctx.escapeHtml(c.cCaseStage || 'No stage set')}</span></td>
@@ -51,7 +51,7 @@
   // the Case entity specifically in this codebase.
   async function fetchCases(term) {
     const query = {
-      select: 'number,name,cCaseStage,contactName,cPropertyAddressStreet,cPropertyAddressCity,cReliefType,cRateableValueBefore,cRateableValueAfter,cAnnualSaving,createdAt,assignedUserId,assignedUserName',
+      select: 'number,cClientRef,name,cCaseStage,contactName,cPropertyAddressStreet,cPropertyAddressCity,cReliefType,cRateableValueBefore,cRateableValueAfter,cAnnualSaving,createdAt,assignedUserId,assignedUserName',
       // 2026-08-28: this used to be 50, and the two panel headings printed
       // "My Cases (n)" / "Team Cases (n)" as though they were real counts -
       // when they were only the split of whichever 50 cases happened to be
@@ -82,7 +82,7 @@
       <div class="panel">
         <div class="field" style="max-width:360px;">
           <label for="cases-search">Search</label>
-          <input type="text" id="cases-search" placeholder="Search by case number, client or address…" autocomplete="off">
+          <input type="text" id="cases-search" placeholder="Search by reference, case number, client or address…" autocomplete="off">
         </div>
       </div>
       <div class="panel">

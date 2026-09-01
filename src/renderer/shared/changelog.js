@@ -33,6 +33,15 @@
   // Newest first. Version strings must match package.json exactly.
   const ENTRIES = [
     {
+      version: '0.2.41',
+      headline: 'Every case now has a reference you can give a client',
+      items: [
+        'Cases now carry a short reference that looks like RVR-2609-K7M2. It is what a client quotes on the phone or in an email, and it shows on the case list, on the case itself, and on their portal.',
+        'You can search by it. Type the whole reference, or just the last few characters, into the search box on Cases.',
+        'The case number has not gone anywhere - it sits next to the reference, so you can still use whichever you prefer.'
+      ]
+    },
+    {
       version: '0.2.40',
       headline: 'The app tells you when a client messages',
       items: [
