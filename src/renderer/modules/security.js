@@ -224,9 +224,14 @@
         btn.disabled = true;
         btn.textContent = 'Turning off…';
 
+        // A 403 ("Not verified.") here is EspoCRM saying "Wrong password." —
+        // an everyday typo, not a fault. Same as the password-change panel
+        // below: don't send tech@ an incident report for it, and don't show
+        // the raw EspoCRM wording (it reads as broken, not as "try again").
         const res = await window.rvr.espo.request(`UserSecurity/${userId}`, {
           method: 'PUT',
-          body: { password, auth2FA: false }
+          body: { password, auth2FA: false },
+          expected403: true
         });
 
         if (ctx.isStale()) return;
@@ -234,10 +239,10 @@
         btn.textContent = 'Turn off two-factor authentication';
 
         if (!res.ok) {
-          showStatus(
-            res.message || "Couldn't turn it off. If this keeps happening, you can also do it from your profile in EspoCRM's own web login (Preferences > Security).",
-            'err'
-          );
+          const msg = res.status === 403
+            ? 'That password is not right. Please check it and try again.'
+            : (res.message || "Couldn't turn it off. If this keeps happening, you can also do it from your profile in EspoCRM's own web login (Preferences > Security).");
+          showStatus(msg, 'err');
           return;
         }
         await paintStatus();
@@ -335,9 +340,14 @@
           // `secret` is deliberately not sent: TotpUserSetup::verifyData()
           // (:70-93) reads the stored auth2FATotpSecret, which the setup call
           // already saved. Sending it did nothing and read as though it did.
+          // A 403 ("Not verified.") here is EspoCRM's verifyData() rejecting
+          // the 6-digit code (wrong or expired) — an everyday mistake, not a
+          // fault. Same treatment as the password-change panel: don't report
+          // it to tech@, and don't show EspoCRM's raw wording.
           const confirmRes = await window.rvr.espo.request(`UserSecurity/${userId}`, {
             method: 'PUT',
-            body: { password, code, auth2FA: true, auth2FAMethod: 'Totp' }
+            body: { password, code, auth2FA: true, auth2FAMethod: 'Totp' },
+            expected403: true
           });
 
           if (ctx.isStale()) return;
@@ -345,7 +355,10 @@
           confirmBtn.textContent = 'Confirm and turn on';
 
           if (!confirmRes.ok) {
-            showStatus(confirmRes.message || 'That code was not accepted. Check the time on your phone and try again.', 'err');
+            const msg = confirmRes.status === 403
+              ? 'That code was not accepted. Check the time on your phone and try again.'
+              : (confirmRes.message || 'That code was not accepted. Check the time on your phone and try again.');
+            showStatus(msg, 'err');
             return;
           }
           await paintStatus();
