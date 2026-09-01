@@ -532,6 +532,18 @@
       const color = surveyorColor(m.assignedUserId);
       // No point offering Accept/Decline on a visit that has been called off.
       const canRespond = ctx.user && m.assignedUserId && ctx.user.id === m.assignedUserId && isLiveBooking(m);
+      // 2026-09-01: an answered appointment still showed both buttons, so a
+      // surveyor who had already accepted could click Accept again and get
+      // nothing, or click Decline with no warning that they were reversing
+      // themselves. Reported by Tyrone as "once it has been accepted it is
+      // still able to be clicked and accepted and declined".
+      //
+      // The button for the answer already given is dropped, and the other one
+      // says "instead" so it reads as a change of mind rather than a first
+      // answer. Deliberately NOT hiding both: a surveyor who accepts and then
+      // cannot attend has to be able to say so, and taking the control away
+      // would push that conversation into a phone call nobody records.
+      const answer = (m.cAcceptanceStatus && m.cAcceptanceStatus !== 'None') ? m.cAcceptanceStatus : null;
       return `
         <div class="cal-event-row">
           <div class="cal-event-time">${ctx.escapeHtml(formatTimeRange(timeOf(m.dateStart), timeOf(m.dateEnd)))}</div>
@@ -548,8 +560,8 @@
           </div>
           ${canRespond ? `
             <div>
-              <button class="btn btn-secondary btn-sm meeting-accept" data-meeting-id="${ctx.escapeHtml(m.id)}">Accept</button>
-              <button class="btn btn-secondary btn-sm meeting-decline" data-meeting-id="${ctx.escapeHtml(m.id)}">Decline</button>
+              ${answer !== 'Accepted' ? `<button class="btn btn-secondary btn-sm meeting-accept" data-meeting-id="${ctx.escapeHtml(m.id)}">${answer ? 'Accept instead' : 'Accept'}</button>` : ''}
+              ${answer !== 'Declined' ? `<button class="btn btn-secondary btn-sm meeting-decline" data-meeting-id="${ctx.escapeHtml(m.id)}">${answer ? 'Decline instead' : 'Decline'}</button>` : ''}
             </div>
           ` : ''}
         </div>

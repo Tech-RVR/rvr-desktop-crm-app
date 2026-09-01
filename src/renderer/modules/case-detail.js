@@ -531,10 +531,13 @@
         </div>
         <div class="field">
           <label for="edit-stage">Case stage</label>
-          <select id="edit-stage">
-            ${STAGE_ORDER.map((s) => `<option value="${esc(s)}" ${c.cCaseStage === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
-          </select>
-          <span class="field-hint">Moving a case on may be guarded by EspoCRM's own rules (Documents Received, Director-only stages) -- any block comes back as a message below.</span>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <select id="edit-stage" style="flex:1;">
+              ${STAGE_ORDER.map((s) => `<option value="${esc(s)}" ${c.cCaseStage === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-primary" id="edit-stage-move-btn">Move case</button>
+          </div>
+          <span class="field-hint">The stage moves on its <strong>own button</strong>, not with Save -- so fixing an address can never move a case by accident. Moving a case on may be guarded by EspoCRM's own rules (Documents Received, Director-only stages); any block comes back as a message below.</span>
         </div>
         <div class="field" id="edit-dispute-reason-field" style="${disputeReasonHidden ? 'display:none;' : ''}">
           <label>Dispute reason(s) <span class="req">*</span></label>
@@ -802,6 +805,60 @@
       }
       stageSelect.addEventListener('change', syncDisputeReasonVisibility);
 
+      // 2026-09-01: the stage now moves on its own button rather than riding
+      // along with Save. It writes ONLY cCaseStage (and the dispute reasons
+      // when they apply), so a half-finished edit elsewhere on the form
+      // cannot be dragged along with it, and a stage change cannot happen by
+      // accident while correcting something else.
+      const moveStageBtn = bodyEl.querySelector('#edit-stage-move-btn');
+      moveStageBtn.addEventListener('click', async () => {
+        const stageVal = stageSelect.value;
+        if (stageVal === current.cCaseStage) {
+          showStatus(`This case is already at "${stageVal}" — pick a different stage to move it.`, 'err');
+          return;
+        }
+
+        const disputeReasonsChecked = Array.from(bodyEl.querySelectorAll('.edit-dispute-reason-cb:checked')).map((cb) => cb.value);
+        if (stageVal === 'Closed Without Payment - Disputed' && disputeReasonsChecked.length === 0) {
+          showStatus('Select at least one dispute reason before closing a case this way.', 'err');
+          return;
+        }
+
+        const stageBody = { cCaseStage: stageVal };
+        if (stageVal === 'Closed Without Payment - Disputed') stageBody.cDisputeReason = disputeReasonsChecked;
+
+        moveStageBtn.disabled = true;
+        moveStageBtn.textContent = 'Moving…';
+        showStatus(`Moving this case to "${stageVal}"…`, 'info');
+
+        const res = await window.rvr.espo.request(`Case/${caseId}`, { method: 'PUT', body: stageBody });
+        if (ctx.isStale()) return;
+        moveStageBtn.disabled = false;
+        moveStageBtn.textContent = 'Move case';
+
+        if (!res.ok) {
+          // A guardrail refusal comes back from EspoCRM as a 400 with a real
+          // sentence in it - "Cannot move this case past Evidence Gathering /
+          // Site Inspection: Floor Plans has not been checked in Documents
+          // Received." That wording is written for staff and is far more use
+          // than anything this screen could invent, so it is shown as-is.
+          if (res.status === 403) {
+            showStatus("You don't have permission to move this case on. It may not be assigned to you, or this stage may be Director-only.", 'err');
+          } else {
+            showStatus(res.message || 'Could not move this case on. Please try again.', 'err');
+          }
+          // Put the dropdown back to where the case actually is, so the screen
+          // never shows a stage the case is not at.
+          stageSelect.value = current.cCaseStage;
+          syncDisputeReasonVisibility();
+          return;
+        }
+
+        current = Object.assign({}, current, res.data || stageBody);
+        showStatus(`Moved to "${stageVal}".`, 'ok');
+        if (typeof onStageChanged === 'function') onStageChanged(current);
+      });
+
       bodyEl.querySelector('#edit-cancel-btn').addEventListener('click', () => {
         editBtn.style.display = '';
         clearStatus();
@@ -817,15 +874,14 @@
           return;
         }
 
-        const stageVal = bodyEl.querySelector('#edit-stage').value;
-        const disputeReasonsChecked = Array.from(bodyEl.querySelectorAll('.edit-dispute-reason-cb:checked')).map((cb) => cb.value);
-        if (stageVal === 'Closed Without Payment - Disputed' && disputeReasonsChecked.length === 0) {
-          showStatus('Select at least one dispute reason before closing a case this way.', 'err');
-          return;
-        }
-
+        // 2026-09-01: cCaseStage and cDisputeReason are deliberately NOT in
+        // this body any more. The stage has its own "Move case" button (see
+        // the wiring below). Reported by Tyrone as "case moves on on the edit
+        // field... maybe we should make it so there's a button?" - and he is
+        // right: a stage change fires guardrails, notifies staff and emails
+        // clients, so it should never be a side effect of correcting a
+        // postcode. Save now saves details; Move case moves the case.
         const body = {
-          cCaseStage: stageVal,
           cReliefType: bodyEl.querySelector('#edit-relief').value || null,
           cPropertyAddressStreet: bodyEl.querySelector('#edit-street').value.trim(),
           cPropertyAddressCity: bodyEl.querySelector('#edit-city').value.trim(),
@@ -839,7 +895,6 @@
         // An empty box now clears the field, as the user plainly intended.
         body.cRateableValueBefore = rvBeforeRaw ? Number(rvBeforeRaw) : null;
         body.cRateableValueAfter = rvAfterRaw ? Number(rvAfterRaw) : null;
-        if (stageVal === 'Closed Without Payment - Disputed') body.cDisputeReason = disputeReasonsChecked;
 
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
