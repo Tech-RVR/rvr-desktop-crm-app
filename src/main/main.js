@@ -543,6 +543,28 @@ ipcMain.handle('app:reportRendererError', async (_event, { errorMessage, stackTr
 ipcMain.handle('app:getVersion', async () => appVersion);
 ipcMain.handle('app:getOsLabel', async () => getOsLabel());
 
+// 2026-09-01: brings the window to the front when somebody clicks a desktop
+// notification about a new client message. Without this the notification is
+// close to useless - the whole point is that you are looking at something
+// else when it arrives, and quite possibly have the app minimised.
+//
+// Deliberately uses getAllWindows()[0] rather than a captured reference, so
+// it cannot go stale if the window is ever recreated (macOS re-opens on dock
+// click). Wrapped because a window that has just been destroyed would
+// otherwise throw into the IPC bridge.
+ipcMain.handle('app:focusWindow', async () => {
+  try {
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win || win.isDestroyed()) return { ok: false };
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    return { ok: true };
+  } catch (_) {
+    return { ok: false };
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Local "seen" tracking for the Messages screen's unread badge — purely a
 // per-install convenience (see the Store defaults comment above), never

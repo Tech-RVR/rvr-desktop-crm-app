@@ -58,6 +58,9 @@ contextBridge.exposeInMainWorld('rvr', {
   app: {
     getVersion: () => ipcRenderer.invoke('app:getVersion'),
     getOsLabel: () => ipcRenderer.invoke('app:getOsLabel'),
+    // 2026-09-01: used only by the click handler on a new-message desktop
+    // notification, to bring the window forward.
+    focusWindow: () => ipcRenderer.invoke('app:focusWindow'),
     reportRendererError: (payload) => ipcRenderer.invoke('app:reportRendererError', payload)
   },
   messages: {

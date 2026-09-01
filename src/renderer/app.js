@@ -271,6 +271,11 @@ function initAppShell() {
 
   document.getElementById('sidebar-logout').addEventListener('click', async () => {
     clearInterval(messagesPollTimer);
+    // 2026-09-01: back to null, not empty. The next person to sign in on this
+    // machine must go through the "first poll, announce nothing" path again,
+    // or they would be told about every message already waiting on their
+    // cases the moment they log in.
+    notifiedCaseIds = null;
     await window.rvr.auth.logout();
     window.location.reload();
   });
@@ -299,6 +304,81 @@ function initAppShell() {
 const MESSAGES_POLL_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes
 let messagesPollTimer = null;
 
+// ---------------------------------------------------------------------------
+// 2026-09-01: DESKTOP NOTIFICATIONS FOR NEW CLIENT MESSAGES.
+//
+// Reported by Tyrone: "Im having to click on messages to get the
+// notification." The sidebar badge was the only signal, and a number that
+// changes in a sidebar you are not looking at is not a notification.
+//
+// null until the first poll has run. That distinction is the whole safety of
+// this: on the first poll after signing in we record what is already waiting
+// WITHOUT announcing it, so somebody opening the app on Monday morning does
+// not get a wall of toasts for messages that arrived on Friday. Only messages
+// that arrive while the app is open are announced.
+// ---------------------------------------------------------------------------
+let notifiedCaseIds = null;
+
+function messagesScreenIsOpen() {
+  const active = document.querySelector('.nav-item.active');
+  return !!(active && active.dataset && active.dataset.moduleId === 'messages');
+}
+
+function maybeNotifyNewMessages(casesWithNews, newestByCase) {
+  if (notifiedCaseIds === null) {
+    notifiedCaseIds = new Set(casesWithNews);
+    return;
+  }
+
+  // A case that has since been read drops out of casesWithNews. Forget it, so
+  // that if the same client writes again later they are announced again
+  // rather than being silently swallowed for the rest of the session.
+  Array.from(notifiedCaseIds).forEach((id) => {
+    if (!casesWithNews.has(id)) notifiedCaseIds.delete(id);
+  });
+
+  const fresh = Array.from(casesWithNews).filter((id) => !notifiedCaseIds.has(id));
+  if (!fresh.length) return;
+  fresh.forEach((id) => notifiedCaseIds.add(id));
+
+  // Already reading the Messages screen? The list in front of them is about to
+  // refresh anyway; a toast on top of it is noise.
+  if (messagesScreenIsOpen() && document.hasFocus()) return;
+
+  showNewMessageNotification(fresh, newestByCase);
+}
+
+function showNewMessageNotification(caseIds, newestByCase) {
+  // Electron gives the renderer a real Notification, but never assume - a
+  // missing or blocked Notification API must not take the badge poll down
+  // with it, which is why this whole thing is wrapped.
+  try {
+    if (typeof Notification === 'undefined') return;
+
+    let title;
+    let body;
+    if (caseIds.length === 1) {
+      const m = newestByCase[caseIds[0]] || {};
+      const who = (m.senderName || '').trim() || 'A client';
+      const where = (m.caseName || '').trim();
+      title = `New message from ${who}`;
+      body = where ? `${where} — open Messages to read and reply.` : 'Open Messages to read and reply.';
+    } else {
+      title = `${caseIds.length} clients are waiting on you`;
+      body = 'New messages have come in. Open Messages to read them.';
+    }
+
+    const n = new Notification(title, { body, silent: false });
+    n.onclick = async () => {
+      try { await window.rvr.app.focusWindow(); } catch (_) { /* still navigate */ }
+      try { navigateTo('messages'); } catch (_) { /* the window is up either way */ }
+    };
+  } catch (_) {
+    // Never let a notification failure break the badge refresh. The badge is
+    // the fallback and it still works.
+  }
+}
+
 async function refreshMessagesBadge() {
   const badge = document.getElementById('messages-badge');
   if (!badge) return; // shell not built, or user has navigated away from it
@@ -314,7 +394,12 @@ async function refreshMessagesBadge() {
 
   const res = await window.rvr.espo.request('CPortalMessage', {
     query: {
-      select: 'caseId,createdAt,direction',
+      // 2026-09-01: senderName and caseName added so a desktop notification
+      // can say who is waiting and on what. The message BODY is deliberately
+      // not selected and never shown in a notification - a Windows toast can
+      // sit on a lock screen or a screen being shared, and a client's words
+      // are not ours to put there. Who and which case is enough to act on.
+      select: 'caseId,caseName,senderName,createdAt,direction',
       'where[0][type]': 'equals',
       'where[0][attribute]': 'direction',
       'where[0][value]': 'From Client',
@@ -337,12 +422,21 @@ async function refreshMessagesBadge() {
   // Count distinct CASES that have at least one client message newer than the
   // last time this person opened that case's messages.
   const casesWithNews = new Set();
+  // Newest unread message per case, kept so a notification can name the
+  // client and the case. The list is already ordered createdAt desc, so the
+  // first one seen for a case is its newest.
+  const newestByCase = {};
   ((res.data && res.data.list) || []).forEach((m) => {
     if (!m.caseId) return;
     const seenAt = seenMap[m.caseId];
-    if (!seenAt || new Date(m.createdAt) > new Date(seenAt)) casesWithNews.add(m.caseId);
+    if (!seenAt || new Date(m.createdAt) > new Date(seenAt)) {
+      casesWithNews.add(m.caseId);
+      if (!newestByCase[m.caseId]) newestByCase[m.caseId] = m;
+    }
   });
   const unreadCaseCount = casesWithNews.size;
+
+  maybeNotifyNewMessages(casesWithNews, newestByCase);
 
   badge.classList.remove('nav-badge-unknown');
   badge.removeAttribute('title');

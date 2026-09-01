@@ -33,6 +33,14 @@
   // Newest first. Version strings must match package.json exactly.
   const ENTRIES = [
     {
+      version: '0.2.40',
+      headline: 'The app tells you when a client messages',
+      items: [
+        'A new client message now pops up a desktop notification instead of only changing the number in the sidebar. Clicking it brings the app to the front and opens Messages.',
+        'You will not be flooded when you sign in - only messages that arrive while the app is open are announced, and nothing pops up while you are already looking at the Messages screen.'
+      ]
+    },
+    {
       version: '0.2.39',
       headline: 'Rejecting a case at the site inspection',
       items: [
