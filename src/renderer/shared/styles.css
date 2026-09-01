@@ -496,3 +496,49 @@ td.message-preview{ color:var(--muted); font-weight:400; }
   font: inherit;
 }
 .case-delete-actions { display: flex; gap: 8px; margin-top: 12px; }
+
+/* 2026-09-01: "What's new" release notes, shown once per person per update. */
+.whats-new-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 20, 33, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9000;
+  padding: 24px;
+}
+.whats-new-modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3);
+  width: 100%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 24px 18px;
+}
+.whats-new-title { margin: 0 0 2px; font-size: 20px; }
+.whats-new-sub { margin: 0 0 14px; color: #5b6472; font-size: 13px; }
+.whats-new-body { overflow-y: auto; }
+.whats-new-entry { margin: 0 0 18px; }
+.whats-new-entry h3 { margin: 0 0 6px; font-size: 15px; }
+.whats-new-version {
+  font-weight: 400;
+  font-size: 12px;
+  color: #5b6472;
+  background: #eef1f5;
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-left: 6px;
+}
+.whats-new-entry ul { margin: 0; padding-left: 18px; }
+.whats-new-entry li { margin: 0 0 7px; line-height: 1.5; }
+.whats-new-actions {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid #e3e7ec;
+  display: flex;
+  justify-content: flex-end;
+}

@@ -169,6 +169,16 @@
       closeHelpMenu();
       showTour(user);
     });
+
+    // 2026-09-01: "What's new" on the same menu, so the release notes are
+    // reachable on demand and not only in the moment they pop up.
+    const whatsNewBtn = document.getElementById('help-whats-new');
+    if (whatsNewBtn) {
+      whatsNewBtn.addEventListener('click', () => {
+        closeHelpMenu();
+        if (window.rvrChangelog) window.rvrChangelog.showAll();
+      });
+    }
   }
 
   async function init(user) {
@@ -178,6 +188,15 @@
       const state = await window.rvr.onboarding.getState(user.id);
       if (!state || (!state.hasSeenTour && !state.dontShowAgain)) {
         showTour(user);
+        // 2026-09-01: somebody seeing the first-run tour is being introduced
+        // to the whole app. Stacking release notes on top of that is noise,
+        // so they are recorded as up to date and start hearing about changes
+        // from the NEXT update onwards.
+        if (window.rvrChangelog) window.rvrChangelog.markUpToDate(user);
+      } else if (window.rvrChangelog) {
+        // Everyone else gets the notes for anything that has shipped since
+        // they last looked. This is the half Tyrone asked for and never got.
+        window.rvrChangelog.showIfNew(user);
       }
     } catch (err) {
       // Never let a broken onboarding-state read block the rest of the

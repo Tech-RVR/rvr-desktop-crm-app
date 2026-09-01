@@ -21,6 +21,7 @@
         <button id="topbar-help" title="Help">?</button>
         <div class="help-menu" id="topbar-help-menu">
           <button id="help-show-tour">Show tutorial</button>
+          <button id="help-whats-new">What's new</button>
         </div>
       </div>
       <div class="avatar" id="topbar-avatar"></div>
@@ -107,6 +108,11 @@
 <script src="modules/messages.js"></script>
 <script src="modules/verification.js"></script>
 <script src="modules/security.js"></script>
+<!-- 2026-09-01: the "what's new on update" notes. A module with no script tag
+     here is dead code that looks fine in review - that is how the Calendar
+     screen was invisible for weeks. Must load before onboarding.js, which
+     calls into it. -->
+<script src="shared/changelog.js"></script>
 <script src="shared/tour-steps.js"></script>
 <script src="shared/onboarding.js"></script>
 <script src="app.js"></script>
