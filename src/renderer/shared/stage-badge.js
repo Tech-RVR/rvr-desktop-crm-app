@@ -28,6 +28,7 @@ const RVR_STAGE_CLASS = {
   'Invoiced': 'b-invoiced',
   'Payment / Arrears': 'b-payment',
   'Closed': 'b-closed',
+  'Site Inspection / Case Rejection': 'b-disputed',
   'Closed Without Payment - Disputed': 'b-disputed'
 };
 
@@ -45,7 +46,8 @@ window.rvrStageBadgeClass = function rvrStageBadgeClass(stage) {
 // doesn't have to duplicate it a third time.
 window.RVR_STAGE_ORDER = [
   'Enquiry Received', 'Onboarding', 'Bill & Document Review', 'Relief Assessment',
-  'Evidence Gathering / Site Inspection', 'Check', 'Challenge', 'Appeal',
+  'Evidence Gathering / Site Inspection', 'Site Inspection / Case Rejection',
+  'Check', 'Challenge', 'Appeal',
   'Senior Sign-Off & Savings Confirmation', 'Invoiced', 'Payment / Arrears',
   'Closed', 'Closed Without Payment - Disputed'
 ];

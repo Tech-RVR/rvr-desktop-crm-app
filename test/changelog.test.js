@@ -68,12 +68,21 @@ function versionsOf(since) {
   return JSON.stringify(cl.entriesNewerThan(since).map((e) => e.version));
 }
 
+// 2026-09-01: these two were written against hardcoded version numbers and
+// broke the moment a release was added - the behaviour was right, the
+// expectation was stale. Derived from ENTRIES instead, so they keep testing
+// the logic without needing an edit every time we ship.
 check('only entries newer than the last seen version are returned', () => {
-  assert.strictEqual(versionsOf('0.2.35'), JSON.stringify(['0.2.38']));
+  const second = cl.ENTRIES[1].version;
+  assert.strictEqual(versionsOf(second), JSON.stringify([cl.ENTRIES[0].version]),
+    'somebody on the second-newest release should be shown exactly the newest one');
 });
 
 check('somebody several releases behind gets all of them', () => {
-  assert.strictEqual(versionsOf('0.2.31'), JSON.stringify(['0.2.38', '0.2.35', '0.2.33']));
+  const oldest = cl.ENTRIES[cl.ENTRIES.length - 1].version;
+  const allButOldest = cl.ENTRIES.slice(0, -1).map((e) => e.version);
+  assert.strictEqual(versionsOf(oldest), JSON.stringify(allButOldest),
+    'somebody on the oldest release we have notes for should be shown every later one');
 });
 
 check('an unknown last-seen version returns nothing rather than everything', () => {

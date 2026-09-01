@@ -32,7 +32,8 @@
   // Real 12-stage pipeline + disputed flag, per EspoCRM_Case_Entity_Scope_DRAFT.md.
   const STAGE_ORDER = [
     'Enquiry Received', 'Onboarding', 'Bill & Document Review', 'Relief Assessment',
-    'Evidence Gathering / Site Inspection', 'Check', 'Challenge', 'Appeal',
+    'Evidence Gathering / Site Inspection', 'Site Inspection / Case Rejection',
+  'Check', 'Challenge', 'Appeal',
     'Senior Sign-Off & Savings Confirmation', 'Invoiced', 'Payment / Arrears',
     'Closed', 'Closed Without Payment - Disputed'
   ];
@@ -1566,13 +1567,21 @@
   // green if passed, gold if current. The disputed terminal state is shown
   // as a single standalone red pill instead of the track, matching the
   // mockup's rvr_crm_mockup.html #detStageTrack behaviour exactly.
+  // 2026-09-01: two stages are ENDINGS rather than steps on the way through,
+  // so neither belongs in the track. A case rejected at the site inspection
+  // never goes on to gather evidence - that is the whole point of it - and
+  // showing it as pill six of fourteen with eight greyed-out steps after it
+  // would suggest the case is still travelling somewhere. Both are drawn as a
+  // single standalone pill instead.
+  const TERMINAL_STAGES = ['Closed Without Payment - Disputed', 'Site Inspection / Case Rejection'];
+
   function renderStageTrack(c) {
-    if (c.cCaseStage === 'Closed Without Payment - Disputed') {
-      return '<span class="stage-pill now disputed">Closed Without Payment - Disputed</span>';
+    if (TERMINAL_STAGES.indexOf(c.cCaseStage) !== -1) {
+      return `<span class="stage-pill now disputed">${c.cCaseStage}</span>`;
     }
     const stageIndex = STAGE_ORDER.indexOf(c.cCaseStage);
     return STAGE_ORDER
-      .filter((s) => s !== 'Closed Without Payment - Disputed')
+      .filter((s) => TERMINAL_STAGES.indexOf(s) === -1)
       .map((s) => {
         const idx = STAGE_ORDER.indexOf(s);
         const cls = idx < stageIndex ? 'done' : (s === c.cCaseStage ? 'now' : '');

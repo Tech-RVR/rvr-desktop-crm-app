@@ -11,7 +11,8 @@
   // grouped under stage names the field doesn't actually have.
   const STAGE_ORDER = [
     'Enquiry Received', 'Onboarding', 'Bill & Document Review', 'Relief Assessment',
-    'Evidence Gathering / Site Inspection', 'Check', 'Challenge', 'Appeal',
+    'Evidence Gathering / Site Inspection', 'Site Inspection / Case Rejection',
+  'Check', 'Challenge', 'Appeal',
     'Senior Sign-Off & Savings Confirmation', 'Invoiced', 'Payment / Arrears',
     'Closed', 'Closed Without Payment - Disputed'
   ];

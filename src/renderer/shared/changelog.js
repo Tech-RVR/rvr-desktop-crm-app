@@ -33,6 +33,14 @@
   // Newest first. Version strings must match package.json exactly.
   const ENTRIES = [
     {
+      version: '0.2.39',
+      headline: 'Rejecting a case at the site inspection',
+      items: [
+        'A surveyor who gets to a property and can see the case will not get through can now reject it there and then, using the new "Site Inspection / Case Rejection" stage. It does not need the signed documents first, because the case is not going any further.',
+        'The booking confirmation clients receive now asks them to have their rates bill, lease and floor plans to hand, and to give access to the whole property. It used to tell them there was nothing to prepare.'
+      ]
+    },
+    {
       version: '0.2.38',
       headline: 'Returning clients, and a clearer case stage',
       items: [
