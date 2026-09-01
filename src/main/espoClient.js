@@ -7,13 +7,18 @@
  * - Each staff member logs in with their OWN real EspoCRM username/password.
  * - The app is a genuine EspoCRM API client — it inherits EspoCRM's existing
  *   6-role ACL model for free. No permission logic is duplicated here.
- * - Auth uses EspoCRM's HTTP Basic Auth support on the REST API (username:password
- *   base64-encoded in the Authorization header, sent per request). This is the
- *   standard EspoCRM API auth method for a "real user" login, distinct from the
+ * - Auth uses EspoCRM's HTTP Basic Auth support on the REST API (base64-encoded
+ *   in the Authorization header, sent per request). This is the standard
+ *   EspoCRM API auth method for a "real user" login, distinct from the
  *   separate API-Key auth used by the n8n automation user.
- * - Credentials are held ONLY in memory in the main process for the life of the
- *   session (never written to disk in plaintext). A future iteration could use
- *   the OS keychain (e.g. via `keytar`) for an opt-in "remember me".
+ * - 2026-09-01: the password is used ONCE, to sign in. EspoCRM hands back an
+ *   auth token, and every request after that sends the token in place of the
+ *   password. That is what makes two-factor authentication work at all (see
+ *   the long note in login()), and it also means the staff member's actual
+ *   password is no longer held for the life of the session.
+ * - Whatever is held is held ONLY in memory in the main process for the life
+ *   of the session (never written to disk in plaintext). A future iteration
+ *   could use the OS keychain (e.g. via `keytar`) for an opt-in "remember me".
  *
  * The Claim a Case screen is the one deliberate exception: it calls the
  * dedicated n8n webhooks (rvr-case-claim-list / rvr-case-claim-submit) instead
@@ -65,6 +70,9 @@ class EspoClient {
     this._authHeader = null;
     this._userName = null;
     this._userId = null;
+    // 2026-09-01: true once _authHeader carries an EspoCRM auth token rather
+    // than the staff member's password. See the 2FA block in login().
+    this._byToken = false;
   }
 
   isAuthenticated() {
@@ -115,8 +123,32 @@ class EspoClient {
       throw new EspoAuthError('Username and password are required.', 400, true);
     }
 
-    const authHeader = 'Basic ' + Buffer.from(`${userName}:${password}`).toString('base64');
-    const headers = { Authorization: authHeader };
+    const credentials = Buffer.from(`${userName}:${password}`).toString('base64');
+    const authHeader = 'Basic ' + credentials;
+    // 2026-09-01: EspoCRM only mints an auth token when the login request
+    // carries its OWN `Espo-Authorization` header. Read from the running
+    // container's Authentication.php: the token is created inside
+    // `if (!$result->isSecondStepRequired() && $request->getHeader(
+    // HeaderKey::AUTHORIZATION))`, and HeaderKey::AUTHORIZATION is the string
+    // 'Espo-Authorization', NOT the standard 'Authorization'. A plain Basic
+    // login authenticates perfectly well and comes back with no token at all,
+    // which is why this app never had one to keep - and why 2FA locked
+    // everybody out (see the token block further down).
+    //
+    // Both headers are sent deliberately. Espo-Authorization is the one that
+    // mints the token; the standard header stays as a fallback so that if
+    // anything between here and PHP ever strips the custom one we degrade to
+    // the old password-on-every-request behaviour rather than failing to sign
+    // in at all. EspoCRM prefers Espo-Authorization when both are present
+    // (Api/Auth.php, obtainUsernamePasswordFromRequest), and its value is the
+    // RAW base64 - no 'Basic ' prefix, unlike the standard header.
+    //
+    // We deliberately do NOT send the create-token-secret header, so the
+    // token comes back with no secret and needs no cookie handling.
+    const headers = {
+      Authorization: authHeader,
+      'Espo-Authorization': credentials
+    };
     if (code) headers['Espo-Authorization-Code'] = code;
 
     const res = await fetch(`${BASE_URL}/App/user`, {
@@ -171,8 +203,52 @@ class EspoClient {
       );
     }
 
-    this._authHeader = authHeader;
-    this._userName = user.userName || userName;
+    // ---------------------------------------------------------------------
+    // 2026-09-01: THE 2FA LOCKOUT FIX. Reported by Tyrone as "logs in then
+    // immediately kicks out and says the session has expired."
+    //
+    // What was happening: login() sent the TOTP code as its own header, and
+    // then threw the code away and stored ONLY `Basic base64(user:password)`.
+    // Every request after that carried the password and no code. EspoCRM's
+    // Authentication.php runs its second-step check whenever
+    // `!$authToken && $this->getTwoFactorEnabled()` - so with no token, EVERY
+    // request re-triggered the 2FA challenge, came back 401, and request()
+    // below turned that into logout() plus "Your session has expired."
+    //
+    // Re-sending the code was never an option: a TOTP code is good for one
+    // 30-second window. The answer is EspoCRM's own auth token, which the
+    // second-step check explicitly skips over.
+    //
+    // The token goes in the password position of a normal Basic header. That
+    // matters for the n8n webhooks, which are handed this exact header via
+    // getAuthHeader() and forward it to GET /App/user to verify who is
+    // calling: EspoCRM looks a token up from the password position
+    // unconditionally (`$authToken = $this->authTokenManager->get($password)`)
+    // so those calls keep working untouched.
+    //
+    // If no token came back we keep the old password header rather than
+    // failing the sign-in. Non-2FA accounts carry on exactly as before, and a
+    // 2FA account is no worse off than it is today.
+    //
+    // Token life on this instance, read from data/config.php on the running
+    // container: authTokenLifetime 0 (no hard expiry) and authTokenMaxIdleTime
+    // 48 hours. The app polls every couple of minutes while it is open, so in
+    // practice a staff member stays signed in; after 48 hours idle the token
+    // goes stale, the next call 401s and they get the honest "session has
+    // expired" prompt this bug was falsely showing them.
+    // ---------------------------------------------------------------------
+    const resolvedUserName = user.userName || userName;
+    const authToken = payload && typeof payload.token === 'string' ? payload.token.trim() : '';
+
+    if (authToken) {
+      this._authHeader = 'Basic ' + Buffer.from(`${resolvedUserName}:${authToken}`).toString('base64');
+      this._byToken = true;
+    } else {
+      this._authHeader = authHeader;
+      this._byToken = false;
+    }
+
+    this._userName = resolvedUserName;
     this._userId = user.id;
 
     return {
@@ -196,6 +272,20 @@ class EspoClient {
     this._authHeader = null;
     this._userName = null;
     this._userId = null;
+    this._byToken = false;
+  }
+
+  /**
+   * The extra headers that go alongside Authorization on every authenticated
+   * call. When the session is running on an auth token rather than a
+   * password, `Espo-Authorization-By-Token` tells EspoCRM to insist on a real
+   * token: without it a stale token would be tried as if it were a password,
+   * which is a pointless round trip and an entry in the failed-login log.
+   * Either way a dead token ends as a 401 and the staff member is asked to
+   * sign in again, which is the honest outcome.
+   */
+  _authExtraHeaders() {
+    return this._byToken ? { 'Espo-Authorization-By-Token': 'true' } : {};
   }
 
   /**
@@ -238,7 +328,8 @@ class EspoClient {
         method,
         headers: {
           Authorization: this._authHeader,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          ...this._authExtraHeaders()
         },
         body: body ? JSON.stringify(body) : undefined,
         signal: requestTimeoutSignal()
@@ -327,7 +418,7 @@ class EspoClient {
     try {
       res = await fetch(`${BASE_URL}/Attachment/file/${encodeURIComponent(fileId)}`, {
         method: 'GET',
-        headers: { Authorization: this._authHeader },
+        headers: { Authorization: this._authHeader, ...this._authExtraHeaders() },
         signal: requestTimeoutSignal()
       });
     } catch (err) {
