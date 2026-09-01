@@ -56,18 +56,62 @@
       orderBy: 'createdAt',
       order: 'desc'
     };
+    let w = 0;
     if (term) {
       // EspoCRM's bracket-notation where clause. textFilter matches name,
       // email and phone in one go, which is what a staff member typing a
       // client's name into a search box actually expects.
-      query['where[0][type]'] = 'textFilter';
-      query['where[0][value]'] = term;
+      query[`where[${w}][type]`] = 'textFilter';
+      query[`where[${w}][value]`] = term;
+      w += 1;
       query.orderBy = 'name';
       query.order = 'asc';
     }
+    // 2026-09-01: archived clients are kept out of this list. A contact is
+    // archived when their last case is deleted, and Tyrone's point was that
+    // they should stop cluttering New Case - but NOT be lost, which is why
+    // they are archived rather than deleted and why findArchivedContact below
+    // offers them back if someone types their details in.
+    //
+    // isFalse, not equals. On this API `equals` against a real boolean column
+    // silently matches nothing and returns HTTP 200 with an empty list, which
+    // here would empty the contact picker entirely.
+    query[`where[${w}][type]`] = 'isFalse';
+    query[`where[${w}][attribute]`] = 'cArchived';
+
     const res = await window.rvr.espo.request('Contact', { query });
     if (!res.ok) return { ok: false, message: res.message };
     return { ok: true, list: (res.data && res.data.list) || [] };
+  }
+
+  // 2026-09-01: does what the person is typing match a client we archived?
+  // Matched on email first, because that is the reliable identifier; falls
+  // back to an exact name match when no email was given. Returns null on a
+  // failed read as well as on no match - the caller treats "we could not
+  // check" as "carry on and create", because blocking case creation over a
+  // duplicate check would be a worse failure than a duplicate contact.
+  async function findArchivedContact(email, fullName) {
+    const query = {
+      select: 'firstName,lastName,name,emailAddress,phoneNumber,cArchivedAt',
+      maxSize: 1,
+      'where[0][type]': 'isTrue',
+      'where[0][attribute]': 'cArchived'
+    };
+    if (email) {
+      query['where[1][type]'] = 'equals';
+      query['where[1][attribute]'] = 'emailAddress';
+      query['where[1][value]'] = email;
+    } else if (fullName) {
+      query['where[1][type]'] = 'equals';
+      query['where[1][attribute]'] = 'name';
+      query['where[1][value]'] = fullName;
+    } else {
+      return null;
+    }
+    const res = await window.rvr.espo.request('Contact', { query });
+    if (!res || !res.ok) return null;
+    const list = (res.data && res.data.list) || [];
+    return list.length ? list[0] : null;
   }
 
   async function render(container, ctx) {
@@ -249,6 +293,9 @@
       contactSelect.value = '';
       createdInThisAttempt.contactId = '';
       createdInThisAttempt.accountId = '';
+      createdInThisAttempt.archivedChoice = null;
+      const oldChoicePanel = container.querySelector('#nc-archived-choice');
+      if (oldChoicePanel) oldChoicePanel.remove();
       syncNewContactFieldsState();
       statusEl.className = 'status-banner';
     });
@@ -256,7 +303,7 @@
     // 2026-08-28: survives across click attempts on purpose - see the note
     // where it is read below. Cleared by "Clear form" and after a case is
     // successfully created.
-    const createdInThisAttempt = { contactId: '', accountId: '' };
+    const createdInThisAttempt = { contactId: '', accountId: '', archivedChoice: null };
 
     submitBtn.addEventListener('click', async () => {
       const name = el('nc-name').value.trim();
@@ -353,7 +400,89 @@
             }
           }
 
-          if (newContactName) {
+          // -----------------------------------------------------------------
+          // 2026-09-01: AN ARCHIVED CLIENT COMING BACK.
+          //
+          // Archived clients are hidden from the picker above, so somebody
+          // re-entering a returning client types their details in here as if
+          // they were new. Creating a second record would lose their history
+          // and leave two contacts with the same email. Tyrone's own design:
+          // if what has been typed matches an archived client, ask whether to
+          // use the details already on file or update them with what has just
+          // been typed - and bring the client out of the archive either way.
+          // -----------------------------------------------------------------
+          function showArchivedChoice(match) {
+            const nm = `${match.firstName || ''} ${match.lastName || ''}`.trim() || match.name || 'this client';
+            let panel = container.querySelector('#nc-archived-choice');
+            if (!panel) {
+              panel = document.createElement('div');
+              panel.id = 'nc-archived-choice';
+              panel.className = 'case-delete-confirm';
+              statusEl.parentNode.insertBefore(panel, statusEl.nextSibling);
+            }
+            panel.innerHTML = `
+              <p style="margin:0 0 10px;">
+                <strong>${ctx.escapeHtml(nm)}</strong> is already on the system as an archived client
+                ${match.emailAddress ? `(${ctx.escapeHtml(match.emailAddress)})` : ''}.
+                They were archived when their last case was deleted.
+              </p>
+              <p style="margin:0 0 12px;">Use the details already on file, or replace them with what you have just typed?</p>
+              <div class="case-delete-actions">
+                <button type="button" class="btn btn-primary" id="nc-archived-use">Use their existing details</button>
+                <button type="button" class="btn btn-secondary" id="nc-archived-update">Update with what I typed</button>
+                <button type="button" class="btn btn-secondary" id="nc-archived-cancel">Cancel</button>
+              </div>`;
+            panel.querySelector('#nc-archived-use').addEventListener('click', () => {
+              createdInThisAttempt.archivedChoice = { id: match.id, action: 'use' };
+              panel.remove();
+              submitBtn.click();
+            });
+            panel.querySelector('#nc-archived-update').addEventListener('click', () => {
+              createdInThisAttempt.archivedChoice = { id: match.id, action: 'update' };
+              panel.remove();
+              submitBtn.click();
+            });
+            panel.querySelector('#nc-archived-cancel').addEventListener('click', () => {
+              panel.remove();
+              showStatus('Nothing created. Change the contact details, or pick a different client.', 'info');
+            });
+            showStatus(`${nm} is already on the system — choose how to bring them back.`, 'info');
+          }
+
+          if (newContactName && !createdInThisAttempt.archivedChoice) {
+            const archivedMatch = await findArchivedContact(newEmail, newContactName);
+            if (ctx.isStale()) return;
+            if (archivedMatch && archivedMatch.id) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Create case';
+              showArchivedChoice(archivedMatch);
+              return;
+            }
+          }
+
+          const archivedChoice = createdInThisAttempt.archivedChoice;
+          if (newContactName && archivedChoice && archivedChoice.id) {
+            const restoreBody = { cArchived: false, cArchivedAt: null };
+            if (archivedChoice.action === 'update') {
+              const parts = String(newContactName).trim().split(/\s+/).filter(Boolean);
+              restoreBody.lastName = parts.length > 1 ? parts[parts.length - 1] : parts[0];
+              restoreBody.firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : '';
+              if (newPhone) restoreBody.phoneNumber = newPhone;
+              if (newEmail) restoreBody.emailAddress = newEmail;
+              if (accountId) restoreBody.accountId = accountId;
+            }
+            const restore = await window.rvr.espo.request(`Contact/${archivedChoice.id}`, { method: 'PUT', body: restoreBody });
+            if (ctx.isStale()) return;
+            if (!restore.ok) {
+              submitBtn.disabled = false;
+              submitBtn.textContent = 'Create case';
+              showStatus(restore.message || 'Could not bring that archived client back out of the archive. Please try again.', 'err');
+              return;
+            }
+            contactId = archivedChoice.id;
+          }
+
+          if (newContactName && !contactId) {
             // 2026-08-28: `"Madonna".split(' ')` never reaches pop(), so the
             // old inline version put the whole name in BOTH firstName and
             // lastName and the contact read "Madonna Madonna" everywhere -
