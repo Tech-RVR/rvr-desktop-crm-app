@@ -318,9 +318,9 @@
               <input type="text" id="cal-location" placeholder="Property being surveyed" autocomplete="off">
             </div>
             <div class="field">
-              <label for="cal-case">Linked case (optional)</label>
+              <label for="cal-case">Linked case <span class="req">*</span></label>
               <input type="text" id="cal-case" placeholder="Case number, e.g. 104" autocomplete="off">
-              <span class="field-hint">The case number shown on the Cases screen. Leave empty if this visit is not for an existing case.</span>
+              <span class="field-hint">The case number shown on the Cases screen. Every site visit has to be attached to a case.</span>
             </div>
             <div class="field">
               <label for="cal-notes">Notes</label>
@@ -822,8 +822,30 @@
       // to nothing - and nobody found out until someone went looking for the
       // visit on the case. Look it up first, accept a plain case NUMBER as
       // well as an id, and refuse to book rather than link to thin air.
+      // 2026-09-01: THE CASE IS NOW COMPULSORY, because the CRM says so.
+      // Meeting.parent is `required: true` on this instance (read live from
+      // Metadata; the required list is name, dateStart, dateEnd, parent,
+      // assignedUser). A booking with an empty case box therefore came back
+      // as "Field validation failure; entityType: Meeting, field: parent,
+      // type: required." and NOTHING WAS CREATED - which is why Tyrone booked
+      // a visit on the Calendar and then could not find it on Bookings.
+      // Confirmed twice: the 400 is in data/logs/espo-2026-08-31.log at
+      // 07:40:12, and the app reported the same failure to App Error Tracking
+      // in the same second.
+      //
+      // Same treatment as New Case got on 2026-08-30 when the contact became
+      // compulsory: refuse up front with a sentence that means something,
+      // rather than letting the person hit a bare validation failure from the
+      // CRM. The old copy actively told them to leave the box empty, which
+      // has been impossible since parent became required.
       let resolvedCase = null;
-      if (caseId) {
+      if (!caseId) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Book appointment';
+        showStatus('Not booked — every site visit has to be attached to a case. Copy the case number from the Cases screen into the case box.', 'err');
+        return;
+      }
+      {
         const looksLikeNumber = /^[0-9]+$/.test(caseId);
         const lookup = looksLikeNumber
           ? await window.rvr.espo.request('Case', {
@@ -843,7 +865,7 @@
         if (!found || !found.id) {
           submitBtn.disabled = false;
           submitBtn.textContent = 'Book appointment';
-          showStatus(`Not booked — no case matches "${caseId}". Leave the box empty if this visit is not for an existing case, or copy the case number from the Cases screen.`, 'err');
+          showStatus(`Not booked — no case matches "${caseId}". Copy the case number from the Cases screen.`, 'err');
           return;
         }
         resolvedCase = found;

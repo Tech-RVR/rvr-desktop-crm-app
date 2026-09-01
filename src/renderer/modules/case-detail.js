@@ -1393,35 +1393,84 @@
     const rolesIds = (rolesRes.data && rolesRes.data.rolesIds) || [];
     if (!rolesIds.includes(DIRECTOR_ADMIN_ROLE_ID)) return;
 
-    slot.innerHTML = '<button class="btn btn-danger" id="case-delete-btn">Delete case</button>';
-    const btn = slot.querySelector('#case-delete-btn');
+    // 2026-09-01: DELETE COULD NEVER WORK IN THE APP. This used
+    // window.confirm() followed by window.prompt() for the typed case-number
+    // check. Electron implements confirm() but NOT prompt() - calling it
+    // throws "prompt() is and will not be supported." So the click threw
+    // before a single request was made, and the only sign of it was an
+    // unhandled promise rejection reaching App Error Tracking. Reported by
+    // Tyrone as "delete cases isn't working for Director/administrator (works
+    // when logging into espoCRM)" - correct, because EspoCRM runs in a real
+    // browser where prompt() exists.
+    //
+    // Both dialogs are now drawn in the page. That also means the whole thing
+    // can be driven in a test, which a native dialog never could be.
+    //
+    // The safety bar is deliberately unchanged: an explicit warning, and the
+    // case number typed by hand before the button will do anything.
+    const caseNumber = String(c.number || '').trim();
+    const label = `Case #${c.number || ''}${c.name ? ` - ${c.name}` : ''}`.trim();
 
-    btn.addEventListener('click', async () => {
-      const label = `Case #${c.number || ''}${c.name ? ` - ${c.name}` : ''}`.trim();
-      // Deliberately NOT promising this can be undone. EspoCRM does keep the
-      // record, but recovering it is a database job, not something anyone
-      // here can click - the document delete already oversells that and it
-      // should not be repeated on something this consequential.
-      const first = window.confirm(
-        `Delete ${label}?\n\nThis removes the case, and its documents and messages go with it. It cannot be undone from inside this app.`
-      );
-      if (!first) return;
-      const typed = window.prompt(`To confirm, type the case number (${c.number || ''}) below.`);
-      if (typed === null) return;
-      if (String(typed).trim() !== String(c.number || '').trim()) {
+    slot.innerHTML = `
+      <button class="btn btn-danger" id="case-delete-btn">Delete case</button>
+      <div id="case-delete-confirm" class="case-delete-confirm" style="display:none;">
+        <p class="case-delete-warning">
+          <strong>Delete ${ctx.escapeHtml(label)}?</strong><br>
+          This removes the case, and its documents and messages go with it.
+          It cannot be undone from inside this app.
+        </p>
+        <label class="field-label" for="case-delete-number">
+          To confirm, type the case number (${ctx.escapeHtml(caseNumber)}) below.
+        </label>
+        <input type="text" id="case-delete-number" autocomplete="off" spellcheck="false">
+        <div class="case-delete-actions">
+          <button class="btn btn-danger" id="case-delete-go">Delete permanently</button>
+          <button class="btn btn-secondary" id="case-delete-cancel">Cancel</button>
+        </div>
+      </div>`;
+
+    const btn = slot.querySelector('#case-delete-btn');
+    const panel = slot.querySelector('#case-delete-confirm');
+    const numberInput = slot.querySelector('#case-delete-number');
+    const goBtn = slot.querySelector('#case-delete-go');
+    const cancelBtn = slot.querySelector('#case-delete-cancel');
+
+    function closeConfirm() {
+      panel.style.display = 'none';
+      btn.style.display = '';
+      numberInput.value = '';
+      goBtn.disabled = false;
+      goBtn.textContent = 'Delete permanently';
+    }
+
+    btn.addEventListener('click', () => {
+      btn.style.display = 'none';
+      panel.style.display = '';
+      numberInput.focus();
+    });
+
+    cancelBtn.addEventListener('click', () => {
+      closeConfirm();
+      status.textContent = '';
+      status.className = 'status-banner';
+    });
+
+    goBtn.addEventListener('click', async () => {
+      if (String(numberInput.value).trim() !== caseNumber) {
         status.textContent = 'Case number did not match - nothing has been deleted.';
         status.className = 'status-banner show err';
+        numberInput.focus();
         return;
       }
 
-      btn.disabled = true;
-      btn.textContent = 'Deleting…';
+      goBtn.disabled = true;
+      goBtn.textContent = 'Deleting…';
       const del = await window.rvr.espo.request(`Case/${caseId}`, { method: 'DELETE' });
       if (ctx.isStale()) return;
 
       if (!del.ok) {
-        btn.disabled = false;
-        btn.textContent = 'Delete case';
+        goBtn.disabled = false;
+        goBtn.textContent = 'Delete permanently';
         status.textContent = del.message || 'Could not delete this case.';
         status.className = 'status-banner show err';
         return;

@@ -475,3 +475,24 @@ td.message-preview{ color:var(--muted); font-weight:400; }
 .surveyor-chip.selected{ border-color:var(--navy); background:var(--bg); font-weight:600; }
 .surveyor-chip.busy{ opacity:0.45; cursor:not-allowed; }
 .surveyor-chip.busy:hover{ border-color:var(--line); }
+
+/* 2026-09-01: in-page delete confirmation for a case. Replaces window.prompt(),
+   which Electron does not implement - it threw and the delete never ran. */
+.case-delete-confirm {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid #b3261e;
+  border-radius: 6px;
+  background: rgba(179, 38, 30, 0.06);
+  max-width: 460px;
+}
+.case-delete-warning { margin: 0 0 10px; line-height: 1.45; }
+.case-delete-confirm input[type="text"] {
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 9px;
+  border: 1px solid #c4c7c5;
+  border-radius: 4px;
+  font: inherit;
+}
+.case-delete-actions { display: flex; gap: 8px; margin-top: 12px; }
